@@ -3,13 +3,20 @@ import { X, Camera, Loader2 } from 'lucide-react';
 import { useAuth } from '../providers/AuthProvider';
 import { supabaseClient } from '../lib/supabase';
 import { useToast } from './ui/use-toast';
+import { useAuthStore } from '../store/useAuthStore';
+import { useCompanyStore } from '../store/useCompanyStore';
+import { cn } from '../lib/utils';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "./ui/dialog"
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -33,11 +40,19 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
   const [senha, setSenha] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const { user, session } = useAuth();
-  const { toast } = useToast();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{
+    type: 'success' | 'error' | null;
+    message: string;
+  } | null>(null);
 
-  const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
-  const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const authStore = useAuthStore();
+  const setCompanyUser = useCompanyStore((state) => state.setUser);
+
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -56,104 +71,183 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
     if (file.size > MAX_FILE_SIZE) {
       toast({
         title: "Erro",
-        description: "A imagem é muito grande. O tamanho máximo é 1MB.",
+        description: "A imagem é muito grande. O tamanho máximo é 10MB.",
         variant: "destructive",
       });
       return;
     }
 
-    try {
-      const timestamp = Date.now();
-      const fileName = `profile_${user.uid}_${timestamp}`;
-      
-      // Prepara o FormData para o webhook
-      const formData = new FormData();
-      formData.append('file', file, `${fileName}.jpeg`);
-      formData.append('empresa', 'jmapps');
-      formData.append('arquivo_nome', fileName);
-      formData.append('extensao', 'jpeg');
-      formData.append('mimetype', 'image/jpeg');
-
-      // Faz o upload para o webhook
-      const uploadResponse = await fetch('https://whkn8n.guardia.work/webhook/gbp_midia', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Accept': '*/*',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-        }
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error('Erro no upload da imagem');
-      }
-
-      const uploadResult = await uploadResponse.json();
-      
-      // Verifica se a resposta tem o formato esperado
-      if (Array.isArray(uploadResult) && uploadResult[0]?.ulrPublica) {
-        // Atualiza o estado com a URL da imagem do servidor
-        setUserData(prev => ({ ...prev, foto: uploadResult[0].ulrPublica }));
-      } else {
-        throw new Error('Formato de resposta inválido');
-      }
-    } catch (error: any) {
-      console.error('Erro ao fazer upload da imagem:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível fazer o upload da imagem. Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      if (e.target) {
-        e.target.value = '';
-      }
-    }
+    // Criar preview local da imagem
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setUserData(prev => ({ ...prev, foto: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+    
+    // Guardar o arquivo para upload posterior
+    setSelectedFile(file);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user?.uid) return;
-
+  const handleSave = async () => {
+    if (!user?.uid) {
+      toast({
+        title: "Erro",
+        description: "Usuário não identificado. Por favor, faça login novamente.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsSaving(true);
+    setSaveStatus(null);
+    
     try {
-      // Atualiza os dados do usuário
-      const { error: updateError } = await supabaseClient
-        .from('gbp_usuarios')
-        .update({ 
-          nome: userData.nome,
-          contato: userData.contato,
-          email: userData.email,
-          foto: userData.foto,
-          updated_at: new Date().toISOString()
-        })
-        .eq('uid', user.uid);
+      let photoUrl = userData.foto;
 
-      if (updateError) throw updateError;
+      // Upload da foto se houver uma nova
+      if (selectedFile) {
+        try {
+          const timestamp = Date.now();
+          
+          if (!user?.empresa_uid) {
+            throw new Error('ID da empresa não encontrado');
+          }
 
-      // Se houver nova senha, atualiza
-      if (senha && session?.access_token) {
-        const { error: passwordError } = await supabaseClient.auth.updateUser({
-          password: senha
-        });
+          // Buscar nome da empresa
+          const { data: empresaData, error: empresaError } = await supabaseClient
+            .from('gbp_empresas')
+            .select('nome')
+            .eq('uid', user.empresa_uid)
+            .single();
 
-        if (passwordError) {
-          console.error('Erro ao atualizar senha:', passwordError);
-          throw passwordError;
+          if (empresaError) {
+            console.error('Erro ao buscar empresa:', empresaError);
+            throw new Error(`Erro ao buscar empresa: ${empresaError.message}`);
+          }
+
+          if (!empresaData?.nome) {
+            throw new Error('Nome da empresa não encontrado');
+          }
+
+          // Formatar nome do arquivo
+          const fileName = `${timestamp}_perfil_${selectedFile.name}`;
+          
+          console.log('Iniciando upload...', {
+            fileSize: selectedFile.size,
+            fileType: selectedFile.type,
+            fileName,
+            empresa: empresaData.nome,
+            empresa_uid: user.empresa_uid
+          });
+
+          // Fazer upload usando o cliente Supabase
+          const { data: uploadData, error: uploadError } = await supabaseClient
+            .storage
+            .from(empresaData.nome)
+            .upload(fileName, selectedFile, {
+              cacheControl: '3600',
+              contentType: selectedFile.type,
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error('Erro no upload:', uploadError);
+            throw new Error(uploadError.message || 'Erro no upload');
+          }
+
+          if (!uploadData?.path) {
+            throw new Error('Caminho do arquivo não retornado');
+          }
+
+          // URL pública do arquivo
+          const { data: urlData } = await supabaseClient
+            .storage
+            .from(empresaData.nome)
+            .getPublicUrl(uploadData.path);
+
+          photoUrl = urlData.publicUrl;
+          
+          console.log('Upload concluído com sucesso. URL:', photoUrl);
+
+        } catch (uploadError: any) {
+          console.error('Erro no upload:', uploadError);
+          
+          toast({
+            title: "Erro no upload",
+            description: uploadError.message || "Não foi possível fazer o upload da imagem",
+            variant: "destructive",
+          });
+          
+          throw new Error('Falha no upload da imagem');
         }
       }
 
-      toast({
-        title: "Sucesso",
-        description: "Perfil atualizado com sucesso!",
+      // Preparar dados para atualização
+      const updateData: {
+        nome?: string | null;
+        contato?: string | null;
+        foto?: string | null;
+        senha?: string | null;
+        email: string;
+      } = {
+        email: userData.email, // email é obrigatório (not null)
+      };
+
+      // Adicionar campos opcionais apenas se tiverem valor
+      if (userData.nome?.trim()) updateData.nome = userData.nome.trim();
+      if (userData.contato?.trim()) updateData.contato = userData.contato.trim();
+      if (photoUrl?.trim()) updateData.foto = photoUrl.trim();
+      if (senha?.trim()) updateData.senha = senha.trim();
+
+      // Atualizar os dados no Supabase
+      const { error: updateError } = await supabaseClient
+        .from('gbp_usuarios')
+        .update(updateData)
+        .eq('uid', user.uid); // Vincula ao uid do usuário logado
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Atualizar estado global
+      if (user) {
+        const updatedUser = {
+          ...user,
+          nome: updateData.nome || user.nome,
+          foto: photoUrl || user.foto
+        };
+
+        // Atualizar AuthStore
+        authStore.setUser({
+          uid: updatedUser.uid,
+          nome: updatedUser.nome,
+          email: updatedUser.email || '',
+          empresa_uid: updatedUser.empresa_uid || '',
+          role: updatedUser.nivel_acesso as 'admin' | 'attendant',
+          foto: updatedUser.foto
+        });
+
+        // Atualizar CompanyStore
+        setCompanyUser(updatedUser);
+
+        // Atualizar localStorage
+        localStorage.setItem('gbp_user', JSON.stringify(updatedUser));
+      }
+
+      setSaveStatus({
+        type: 'success',
+        message: 'Perfil atualizado com sucesso!'
       });
 
-      onClose();
     } catch (error: any) {
       console.error('Erro ao atualizar perfil:', error);
+      setSaveStatus({
+        type: 'error',
+        message: error.message || 'Não foi possível atualizar o perfil.'
+      });
       toast({
         title: "Erro",
-        description: error.message || "Não foi possível atualizar o perfil. Tente novamente.",
+        description: error.message || "Não foi possível atualizar o perfil.",
         variant: "destructive",
       });
     } finally {
@@ -161,11 +255,12 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
     }
   };
 
+  // Carregar dados do usuário
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user?.uid) return;
-
       setIsLoading(true);
+
       try {
         const { data, error } = await supabaseClient
           .from('gbp_usuarios')
@@ -174,14 +269,20 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           .single();
 
         if (error) throw error;
+
         if (data) {
-          setUserData(data);
+          setUserData({
+            nome: data.nome || '',
+            contato: data.contato || '',
+            email: data.email || '',
+            foto: data.foto || ''
+          });
         }
       } catch (error) {
         console.error('Erro ao carregar dados do usuário:', error);
         toast({
           title: "Erro",
-          description: "Não foi possível carregar seus dados. Tente novamente.",
+          description: "Não foi possível carregar os dados do usuário.",
           variant: "destructive",
         });
       } finally {
@@ -192,169 +293,131 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
     if (isOpen) {
       fetchUserData();
     }
-  }, [isOpen, user?.uid, toast]);
-
-  // Função para formatar o nome da empresa
-  const formatEmpresaNome = (nome: string): string => {
-    return nome
-      .toLowerCase() // converte para minúsculas
-      .normalize('NFD') // normaliza caracteres acentuados
-      .replace(/[\u0300-\u036f]/g, '') // remove acentos
-      .replace(/[^a-z0-9]/g, ''); // remove caracteres especiais
-  };
+  }, [isOpen, user?.uid]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent 
-        className="fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] w-[95vw] max-w-[400px] bg-white dark:bg-gray-900 rounded-lg shadow-xl" 
-        hideClose
-      >
-        <div className="relative h-16 bg-gradient-to-r from-blue-600 to-blue-400 rounded-t-lg">
-          <DialogTitle className="sr-only">
-            Editar Perfil
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Atualize suas informações de perfil como nome, telefone, email e foto.
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Editar Perfil</DialogTitle>
+          <DialogDescription>
+            Atualize suas informações de perfil
           </DialogDescription>
-          <button 
-            onClick={onClose}
-            className="absolute right-2 top-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-          >
-            <X className="h-4 w-4 text-white" />
-          </button>
-          <div className="absolute -bottom-8 w-full px-4">
-            <div className="flex items-end gap-3">
-              <div className="relative">
-                <label
-                  htmlFor="photo-upload"
-                  className="block cursor-pointer"
-                >
-                  {userData.foto ? (
-                    <div className="relative group">
-                      <img
-                        src={userData.foto}
-                        alt=""
-                        className="h-14 w-14 rounded-full object-cover border-3 border-white dark:border-gray-900 shadow-lg transition-opacity"
-                      />
-                      <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Camera size={20} className="text-white" />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-14 w-14 rounded-full bg-gray-200 dark:bg-gray-800 border-3 border-white dark:border-gray-900 shadow-lg flex items-center justify-center group hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">
-                      <Camera size={20} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-400 transition-colors" />
-                    </div>
-                  )}
-                </label>
-                <input
-                  type="file"
-                  id="photo-upload"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
+        </DialogHeader>
+
+        <div className="grid gap-4 py-4">
+          {/* Avatar com upload */}
+          <div className="flex flex-col items-center gap-4">
+            <label
+              htmlFor="avatar-upload"
+              className="relative cursor-pointer group"
+            >
+              <div className="h-24 w-24 rounded-full overflow-hidden bg-gray-100 ring-2 ring-offset-2 ring-offset-white ring-primary/20 group-hover:ring-primary/40 transition-all">
+                {userData.foto ? (
+                  <img
+                    src={userData.foto}
+                    alt="Avatar"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center bg-gray-100">
+                    <Camera className="h-8 w-8 text-gray-400" />
+                  </div>
+                )}
               </div>
-              <h2 className="text-base font-semibold mb-1 text-gray-900 dark:text-white">
-                Editar Perfil
-              </h2>
+              <div className="absolute bottom-0 right-0 p-1.5 rounded-full bg-primary shadow-lg group-hover:bg-primary/90 transition-colors">
+                <Camera className="h-4 w-4 text-white" />
+              </div>
+              <input
+                id="avatar-upload"
+                type="file"
+                className="hidden"
+                accept=".jpeg,.jpg,.png,.webp,image/jpeg,image/jpg,image/png,image/webp"
+                onChange={handleFileChange}
+              />
+            </label>
+            <span className="text-sm text-gray-500">Clique para alterar a foto</span>
+          </div>
+
+          {/* Campos do formulário */}
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="nome">Nome completo</Label>
+              <Input
+                id="nome"
+                value={userData.nome}
+                onChange={(e) => setUserData(prev => ({ ...prev, nome: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="whatsapp">WhatsApp</Label>
+              <Input
+                id="whatsapp"
+                value={userData.contato}
+                onChange={(e) => setUserData(prev => ({ ...prev, contato: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                value={userData.email}
+                onChange={(e) => setUserData(prev => ({ ...prev, email: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="senha">Nova senha</Label>
+              <Input
+                id="senha"
+                type="password"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                placeholder="Digite para alterar a senha"
+              />
             </div>
           </div>
         </div>
 
-        <div className="p-4 pt-12 space-y-4">
-          {isLoading ? (
-            <div className="py-8 flex justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+        <DialogFooter className="flex flex-col gap-4">
+          {/* Área de status */}
+          {saveStatus && (
+            <div className={cn(
+              "w-full p-3 rounded-md text-sm",
+              saveStatus.type === 'success' 
+                ? "bg-green-50 text-green-700 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+            )}>
+              {saveStatus.message}
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-3">
-              {/* Nome */}
-              <div className="space-y-1">
-                <label htmlFor="nome" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Nome completo
-                </label>
-                <input
-                  type="text"
-                  id="nome"
-                  name="nome"
-                  value={userData.nome || ''}
-                  onChange={(e) => setUserData(prev => ({ ...prev, nome: e.target.value }))}
-                  className="block w-full h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white text-sm bg-transparent transition-colors duration-200"
-                  required
-                />
-              </div>
-
-              {/* Contato */}
-              <div>
-                <label htmlFor="contato" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Contato
-                </label>
-                <input
-                  type="tel"
-                  id="contato"
-                  name="contato"
-                  value={userData.contato || ''}
-                  onChange={(e) => setUserData(prev => ({ ...prev, contato: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                />
-              </div>
-
-              {/* Email */}
-              <div className="space-y-1">
-                <label htmlFor="email" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                  E-mail
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={userData.email || ''}
-                  onChange={(e) => setUserData(prev => ({ ...prev, email: e.target.value }))}
-                  className="block w-full h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white text-sm bg-transparent transition-colors duration-200"
-                  required
-                />
-              </div>
-
-              {/* Nova Senha */}
-              <div className="space-y-1">
-                <label htmlFor="senha" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Nova senha
-                </label>
-                <input
-                  type="password"
-                  id="senha"
-                  value={senha}
-                  onChange={(e) => setSenha(e.target.value)}
-                  className="block w-full h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white text-sm bg-transparent transition-colors duration-200"
-                  placeholder="Deixe em branco para não alterar"
-                />
-              </div>
-
-              {/* Botões */}
-              <div className="flex gap-2 pt-3 border-t border-gray-100 dark:border-gray-800 mt-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700 transition-colors duration-200"
-                  disabled={isSaving}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-500 border border-transparent rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isSaving}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                  ) : (
-                    'Salvar'
-                  )}
-                </button>
-              </div>
-            </form>
           )}
-        </div>
+
+          {/* Botões */}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={onClose}
+            >
+              Fechar
+            </Button>
+            <Button 
+              onClick={handleSave} 
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Salvar'
+              )}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
