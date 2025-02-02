@@ -215,7 +215,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Atendimentos"
                 value={Number(dashboardData?.totalAtendimentos || 0)}
-                total={100}
+                total={Number(dashboardData?.totalAtendimentos || 0)}
                 icon={Users}
                 color="text-blue-700"
                 stats={dashboardData.atendimentosStats}
@@ -223,7 +223,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Eleitores"
                 value={Number(dashboardData?.totalEleitores || 0)}
-                total={dashboardData?.totalEleitores || 0}
+                total={Number(dashboardData?.totalEleitores || 0)}
                 icon={Users}
                 color="text-green-700"
                 stats={dashboardData.eleitoresStats}
@@ -240,7 +240,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Ofícios"
                 value={Number(dashboardData?.totalOficios || 0)}
-                total={50}
+                total={Number(dashboardData?.totalOficios || 0)}
                 icon={FileText}
                 color="text-yellow-700"
                 stats={dashboardData.oficiosStats}
@@ -248,7 +248,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Requerimentos"
                 value={Number(dashboardData?.totalRequerimentos || 0)}
-                total={50}
+                total={Number(dashboardData?.totalRequerimentos || 0)}
                 icon={FileSpreadsheet}
                 color="text-orange-700"
                 stats={dashboardData.requerimentosStats}
@@ -256,7 +256,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Projetos"
                 value={Number(dashboardData?.totalProjetosLei || 0)}
-                total={10}
+                total={Number(dashboardData?.totalProjetosLei || 0)}
                 icon={BookOpen}
                 color="text-purple-700"
                 stats={dashboardData.projetosLeiStats}
@@ -264,7 +264,7 @@ export function Dashboard() {
               <StatCard
                 title="Total de Agendamentos"
                 value={Number(dashboardData?.totalAgendamentos || 0)}
-                total={50}
+                total={Number(dashboardData?.totalAgendamentos || 0)}
                 icon={Calendar}
                 color="text-indigo-700"
                 stats={dashboardData.agendamentosStats}

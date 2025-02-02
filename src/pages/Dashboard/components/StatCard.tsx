@@ -102,68 +102,46 @@ export function StatCard({ title, value, total, icon: Icon, color, stats }: Stat
             ))}
           </div>
 
-          <div className="space-y-4">
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-blue-900">Total no Período</h4>
-              <p className="text-2xl font-bold text-blue-700">{stats.total}</p>
-            </div>
+          <div className="mt-4 space-y-4">
+            {/* Botão Ver Detalhes - apenas para Total de Eleitores */}
+            {title === 'Total de Eleitores' && (
+              <div className="flex justify-end">
+                <Link
+                  to="/app/eleitores/relatorio"
+                  className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1"
+                >
+                  Ver detalhes
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </div>
+            )}
 
-            <div className="bg-green-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-green-900">Crescimento</h4>
-              <p className={`text-2xl font-bold ${stats.crescimento >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {stats.crescimento >= 0 ? '+' : ''}{stats.crescimento.toFixed(1)}%
-              </p>
-            </div>
+            <div className="space-y-4">
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-blue-900">Total no Período</h4>
+                <p className="text-2xl font-bold text-blue-700">{stats.total}</p>
+              </div>
 
-            <div className="bg-white rounded-lg p-4 border border-gray-100">
-              <h4 className="text-sm font-medium text-gray-900 mb-4">Distribuição por Dia</h4>
-              {Object.entries(stats.distribuicaoPorDia).map(([dia, valor]) => (
-                <div key={dia} className="mb-3">
-                  <div className="flex justify-between items-center text-sm mb-1.5">
-                    <span className="font-medium text-gray-700">{dia}</span>
-                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
-                      {valor} registros
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-100 rounded-full h-3">
-                    <div
-                      className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
-                      style={{
-                        width: `${(valor / total) * 100}%`,
-                        transition: 'width 0.5s ease-in-out'
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+              <div className="bg-green-50 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-green-900">Crescimento</h4>
+                <p className={`text-2xl font-bold ${stats.crescimento >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {stats.crescimento >= 0 ? '+' : ''}{stats.crescimento.toFixed(1)}%
+                </p>
+              </div>
 
-            <div className="bg-white rounded-lg p-4 border border-gray-100">
-              <h4 className="text-sm font-medium text-gray-900 mb-4">Distribuição por Horário</h4>
-              {Object.entries(stats.distribuicaoPorHorario).map(([horario, valor], index) => {
-                const colors = {
-                  'Manhã (6h-12h)': 'from-yellow-500 to-yellow-600',
-                  'Tarde (12h-18h)': 'from-orange-500 to-orange-600',
-                  'Noite (18h-6h)': 'from-blue-500 to-blue-600'
-                };
-                const bgColors = {
-                  'Manhã (6h-12h)': 'bg-yellow-50 text-yellow-700',
-                  'Tarde (12h-18h)': 'bg-orange-50 text-orange-700',
-                  'Noite (18h-6h)': 'bg-blue-50 text-blue-700'
-                };
-                return (
-                  <div key={horario} className="mb-3">
+              <div className="bg-white rounded-lg p-4 border border-gray-100">
+                <h4 className="text-sm font-medium text-gray-900 mb-4">Distribuição por Dia</h4>
+                {Object.entries(stats.distribuicaoPorDia).map(([dia, valor]) => (
+                  <div key={dia} className="mb-3">
                     <div className="flex justify-between items-center text-sm mb-1.5">
-                      <span className="font-medium text-gray-700">{horario}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${bgColors[horario as keyof typeof bgColors]}`}>
-                          {valor} registros
-                        </span>
-                      </div>
+                      <span className="font-medium text-gray-700">{dia}</span>
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                        {valor} registros
+                      </span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-3">
                       <div
-                        className={`h-3 rounded-full bg-gradient-to-r ${colors[horario as keyof typeof colors]}`}
+                        className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
                         style={{
                           width: `${(valor / total) * 100}%`,
                           transition: 'width 0.5s ease-in-out'
@@ -171,20 +149,46 @@ export function StatCard({ title, value, total, icon: Icon, color, stats }: Stat
                       />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                ))}
+              </div>
 
-          {/* Botão Ver Detalhes */}
-          <div className="mt-4 flex justify-end">
-            <Link
-              to="/app/eleitores/relatorio"
-              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1"
-            >
-              Ver detalhes
-              <ChevronRight className="h-4 w-4" />
-            </Link>
+              <div className="bg-white rounded-lg p-4 border border-gray-100">
+                <h4 className="text-sm font-medium text-gray-900 mb-4">Distribuição por Horário</h4>
+                {Object.entries(stats.distribuicaoPorHorario).map(([horario, valor], index) => {
+                  const colors = {
+                    'Manhã (6h-12h)': 'from-yellow-500 to-yellow-600',
+                    'Tarde (12h-18h)': 'from-orange-500 to-orange-600',
+                    'Noite (18h-6h)': 'from-blue-500 to-blue-600'
+                  };
+                  const bgColors = {
+                    'Manhã (6h-12h)': 'bg-yellow-50 text-yellow-700',
+                    'Tarde (12h-18h)': 'bg-orange-50 text-orange-700',
+                    'Noite (18h-6h)': 'bg-blue-50 text-blue-700'
+                  };
+                  return (
+                    <div key={horario} className="mb-3">
+                      <div className="flex justify-between items-center text-sm mb-1.5">
+                        <span className="font-medium text-gray-700">{horario}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${bgColors[horario as keyof typeof bgColors]}`}>
+                            {valor} registros
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-3">
+                        <div
+                          className={`h-3 rounded-full bg-gradient-to-r ${colors[horario as keyof typeof colors]}`}
+                          style={{
+                            width: `${(valor / total) * 100}%`,
+                            transition: 'width 0.5s ease-in-out'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -20,205 +20,289 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
-export default function Cadastro() {
-  log('Componente Cadastro renderizado');
+interface FormConfig {
+  id: number;
+  categoria_uid: string;
+  campos_config: string[];
+  created_at: string;
+  updated_at: string;
+  form_status: boolean;
+  registration_limit: number | null;
+  empresa_uid: string;
+  uid: string;
+  url_slug: string;
+  form_title: string;
+  form_title_color: string;
+  form_logo_url: string | null;
+  form_theme: {
+    primaryColor: string;
+    backgroundColor: string;
+  };
+  categoria: {
+    uid: string;
+    nome: string;
+    descricao: string;
+  };
+  empresa: {
+    uid: string;
+    nome: string;
+    logo_url: string;
+  };
+}
 
+interface Field {
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  visible: boolean;
+  isAnexo: boolean;
+}
+
+interface FormStyle {
+  title: string;
+  titleColor: string;
+  logoUrl: string;
+  theme: {
+    primaryColor: string;
+    backgroundColor: string;
+  };
+}
+
+const defaultFormStyle: FormStyle = {
+  title: 'Formulário de Cadastro',
+  titleColor: '#000000',
+  logoUrl: '',
+  theme: {
+    primaryColor: '#1976d2',
+    backgroundColor: '#f5f5f5'
+  }
+};
+
+export default function Cadastro() {
+  console.log('=== COMPONENTE CADASTRO INICIADO ===');
+  
   const router = useRouter();
-  const [formConfigs, setFormConfigs] = useState([]);
-  const [visibleFields, setVisibleFields] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [formStyle, setFormStyle] = useState({
-    title: 'Formulário de Cadastro',
-    titleColor: '#000000',
-    logoUrl: '',
-    theme: {
-      primaryColor: '#1976d2',
-      backgroundColor: '#f5f5f5'
-    }
+  console.log('Router inicial:', {
+    query: router.query,
+    isReady: router.isReady,
+    pathname: router.pathname,
+    asPath: router.asPath
   });
 
-  // Log da URL atual
-  log('URL atual:', window.location.href);
-  log('Query params:', router.query);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [formConfig, setFormConfig] = useState<FormConfig | null>(null);
+  const [visibleFields, setVisibleFields] = useState<Field[]>([]);
+  const [formStyle, setFormStyle] = useState<FormStyle>(defaultFormStyle);
+  const [categoriaUid, setCategoriaUid] = useState<string | null>(null);
+  const [empresaUid, setEmpresaUid] = useState<string | null>(null);
+
+  // Efeito para monitorar mudanças no router
+  useEffect(() => {
+    console.log('Router mudou:', {
+      query: router.query,
+      isReady: router.isReady,
+      pathname: router.pathname,
+      asPath: router.asPath
+    });
+  }, [router.query, router.isReady, router.pathname, router.asPath]);
 
   useEffect(() => {
     const loadFormConfig = async () => {
       try {
-        log('Iniciando carregamento do formulário');
-        
-        // Obtém a categoria da URL
+        if (!router.isReady || !router.query.categoria) {
+          console.log('Router não está pronto ou categoria não definida:', {
+            isReady: router.isReady,
+            categoria: router.query.categoria
+          });
+          return;
+        }
+
         const { categoria } = router.query;
-        log('Categoria da URL:', categoria);
+        console.log('1. URL Slug da categoria:', categoria);
 
-        if (!categoria) {
-          log('Categoria não encontrada na URL');
-          setError('404');
-          return;
-        }
-
-        // Primeiro, busca o uid da categoria pelo nome
-        const { data: categoriaData, error: categoriaError } = await supabaseClient
-          .from('gbp_categorias')
-          .select('uid')
-          .eq('nome', categoria)
-          .single();
-
-        if (categoriaError) {
-          log('Erro ao buscar categoria:', categoriaError);
-          throw categoriaError;
-        }
-
-        if (!categoriaData) {
-          log('Categoria não encontrada no banco');
-          setError('404');
-          return;
-        }
-
-        log('Categoria encontrada:', categoriaData);
-
-        // Agora busca as configurações de estilo do formulário usando o uid da categoria
-        const { data: formConfig, error: formConfigError } = await supabaseClient
+        // Busca a configuração do formulário com joins para empresa e categoria
+        console.log('2. Buscando configuração do formulário com dados relacionados...');
+        const { data: formConfigData, error: formConfigError } = await supabaseClient
           .from('gbp_form_config')
-          .select('*')
-          .eq('categoria_uid', categoriaData.uid)
+          .select(`
+            *,
+            empresa:gbp_empresas!gbp_form_config_empresa_uid_fkey (
+              uid,
+              nome,
+              logo_url
+            ),
+            categoria:gbp_categorias!gbp_form_config_categoria_uid_fkey (
+              uid,
+              nome,
+              descricao
+            )
+          `)
+          .eq('url_slug', categoria)
           .single();
 
-        if (formConfigError && formConfigError.code !== 'PGRST116') {
-          log('Erro ao carregar configurações do formulário:', formConfigError);
+        if (formConfigError) {
+          console.error('3. Erro ao carregar form_config:', formConfigError);
           throw formConfigError;
         }
 
-        log('Configurações do formulário:', formConfig);
-
-        if (formConfig) {
-          setFormStyle({
-            title: formConfig.form_title || 'Formulário de Cadastro',
-            titleColor: formConfig.form_title_color || '#000000',
-            logoUrl: formConfig.form_logo_url || '',
-            theme: formConfig.form_theme || {
-              primaryColor: '#1976d2',
-              backgroundColor: '#f5f5f5'
-            }
-          });
+        if (!formConfigData) {
+          console.error('3. form_config não encontrado para url_slug:', categoria);
+          setError('Configuração não encontrada');
+          return;
         }
 
-        // Busca configurações baseadas na categoria
+        console.log('4. Dados carregados:', {
+          formConfig: formConfigData,
+          empresa: formConfigData.empresa,
+          categoria: formConfigData.categoria
+        });
+
+        // Validações importantes
+        if (!formConfigData.categoria?.uid) {
+          console.error('5. Categoria não encontrada');
+          setError('Configuração inválida: categoria não encontrada');
+          return;
+        }
+
+        if (!formConfigData.empresa?.uid) {
+          console.error('5. Empresa não encontrada');
+          setError('Configuração inválida: empresa não encontrada');
+          return;
+        }
+
+        if (!formConfigData.form_status) {
+          console.error('5. Formulário desativado');
+          setError('Este formulário está desativado');
+          return;
+        }
+
+        // Armazena os UIDs
+        setCategoriaUid(formConfigData.categoria.uid);
+        setEmpresaUid(formConfigData.empresa.uid);
+
+        // Define o estilo do formulário com dados da empresa
+        setFormStyle({
+          title: formConfigData.form_title || `Cadastro - ${formConfigData.categoria.nome}`,
+          titleColor: formConfigData.form_title_color || '#000000',
+          logoUrl: formConfigData.form_logo_url || formConfigData.empresa.logo_url || '',
+          theme: formConfigData.form_theme || {
+            primaryColor: '#1976d2',
+            backgroundColor: '#f5f5f5'
+          }
+        });
+
+        // Armazena a configuração completa
+        setFormConfig(formConfigData);
+
+        // Busca configurações dos campos
+        console.log('6. Buscando campos para categoria:', formConfigData.categoria.nome);
         const { data: configs, error: configError } = await supabaseClient
           .from('gbp_gerenciar')
           .select('*')
-          .eq('categoria_nome', categoria)
+          .eq('categoria_uid', formConfigData.categoria.uid)
           .eq('formulario_ativo', true);
 
-        log('Resultado da query:', { configs, error: configError });
-
         if (configError) {
-          log('Erro na query:', configError);
+          console.error('7. Erro ao carregar configurações dos campos:', configError);
           throw configError;
         }
 
         if (!configs || configs.length === 0) {
-          log('Nenhuma configuração encontrada');
-          setError('404');
+          console.error('7. Nenhuma configuração de campo encontrada');
+          setError('Configuração de campos não encontrada');
           return;
         }
 
-        // Lista de campos padrão
-        const defaultFields = [
-          { id: 'nome', label: 'Nome Completo', type: 'text' },
-          { id: 'cpf', label: 'CPF', type: 'text' },
-          { id: 'data_nascimento', label: 'Data de Nascimento', type: 'date' },
-          { id: 'titulo_eleitor', label: 'Título de Eleitor', type: 'text' },
-          { id: 'zona', label: 'Zona', type: 'text' },
-          { id: 'secao', label: 'Seção', type: 'text' },
-          { id: 'genero', label: 'Gênero', type: 'select' },
-          { id: 'telefone', label: 'Telefone', type: 'tel' },
-          { id: 'whatsapp', label: 'WhatsApp', type: 'tel' },
-          { id: 'cep', label: 'CEP', type: 'text' },
-          { id: 'logradouro', label: 'Logradouro', type: 'text' },
-          { id: 'numero', label: 'Número', type: 'text' },
-          { id: 'complemento', label: 'Complemento', type: 'text' },
-          { id: 'bairro', label: 'Bairro', type: 'text' },
-          { id: 'cidade', label: 'Cidade', type: 'text' }
-        ];
+        console.log('8. Campos encontrados:', configs);
 
-        // Processa os campos
-        const activeFields = defaultFields
-          .map(field => {
-            const config = configs.find(c => c.nome_campo === field.id);
-            return {
-              ...field,
-              visible: config?.visivel === true && config?.formulario_ativo === true,
-              required: config?.obrigatorio || false,
-              isAnexo: config?.anexo || false
-            };
-          })
-          .filter(field => field.visible === true);
-
-        log('Campos ativos após filtragem:', activeFields);
+        // Processa os campos visíveis
+        const activeFields = configs
+          .filter(config => config.visivel && config.formulario_ativo)
+          .map(config => ({
+            id: config.nome_campo,
+            label: config.label || config.nome_campo,
+            type: config.tipo || 'text',
+            required: config.obrigatorio || false,
+            visible: true,
+            isAnexo: config.anexo || false
+          }));
 
         setVisibleFields(activeFields);
-        setFormConfigs(configs.filter(c => c.visivel === true));
+        setLoading(false);
+
       } catch (error) {
-        log('Erro ao carregar formulário:', error);
-        setError('404');
-      } finally {
+        console.error('Erro durante o carregamento:', error);
+        setError('Erro ao carregar formulário');
         setLoading(false);
       }
     };
 
-    loadFormConfig();
-  }, [router.query]);
+    if (router.isReady) {
+      console.log('Router está pronto, iniciando carregamento...');
+      loadFormConfig();
+    }
+  }, [router.isReady, router.query]);
 
-  const checkExistingCpf = async (cpf: string) => {
+  const handleSubmit = async (formData: any) => {
     try {
-      // Remove qualquer formatação do CPF
-      const cleanCpf = cpf.replace(/[^\d]/g, '');
-      
-      if (cleanCpf.length !== 11) {
-        return false;
+      console.log('Dados do formulário:', formData);
+      console.log('UIDs disponíveis:', {
+        categoria_uid: categoriaUid,
+        empresa_uid: empresaUid
+      });
+
+      if (!categoriaUid || !empresaUid) {
+        console.error('categoria_uid ou empresa_uid não definidos');
+        setError('Erro: Configuração incompleta do formulário');
+        return;
       }
 
-      const pathname = window.location.pathname;
-      const matches = pathname.match(/\/cadastro\/(\d+)\/(\d+)/);
-      const empresaId = matches?.[2];
+      // Preparar dados para envio
+      const dadosParaEnviar = {
+        nome: formData.nome,
+        cpf: formData.cpf,
+        nascimento: formData.nascimento,
+        whatsapp: formData.whatsapp,
+        telefone: formData.telefone,
+        genero: formData.genero,
+        titulo: formData.titulo,
+        zona: formData.zona,
+        secao: formData.secao,
+        cep: formData.cep,
+        logradouro: formData.logradouro,
+        cidade: formData.cidade,
+        bairro: formData.bairro,
+        numero: formData.numero,
+        complemento: formData.complemento,
+        nome_mae: formData.nome_mae,
+        uf: formData.uf,
+        categoria_uid: categoriaUid,
+        empresa_uid: empresaUid,
+        created_at: new Date().toISOString()
+      };
 
-      if (!empresaId) {
-        console.error('ID da empresa não encontrado na URL');
-        return false;
-      }
+      console.log('Dados preparados para envio:', dadosParaEnviar);
 
-      // Consulta usando o CPF limpo e empresa_uid
+      // Enviar para o Supabase
       const { data, error } = await supabaseClient
         .from('gbp_eleitores')
-        .select('id')
-        .eq('cpf', cleanCpf)
-        .eq('empresa_uid', empresaId)
-        .maybeSingle();
+        .insert([dadosParaEnviar])
+        .select();
 
       if (error) {
-        console.error('Erro ao consultar CPF:', error);
-        return false;
+        console.error('Erro ao enviar formulário:', error);
+        throw error;
       }
 
-      return data !== null;
+      console.log('Formulário enviado com sucesso:', data);
+      
+      // Redirecionar ou mostrar mensagem de sucesso
+      router.push('/sucesso');
     } catch (error) {
-      console.error('Erro ao verificar CPF:', error);
-      return false;
-    }
-  };
-
-  const handleCpfChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const cpf = e.target.value;
-    const cleanCpf = cpf.replace(/[^\d]/g, '');
-    
-    if (cleanCpf.length === 11) {
-      const exists = await checkExistingCpf(cleanCpf);
-      if (exists) {
-        setError('CPF já cadastrado');
-      } else {
-        setError(null);
-      }
+      console.error('Erro ao enviar formulário:', error);
+      setError('Erro ao enviar formulário. Por favor, tente novamente.');
     }
   };
 
@@ -242,38 +326,13 @@ export default function Cadastro() {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-3xl mx-auto px-4">
         <FormularioCadastro
-          fields={visibleFields}
-          documentos={formConfigs
-            .filter(c => c.anexo && c.visivel)
-            .map(c => ({
-              id: c.nome_campo,
-              nome: c.nome_campo,
-              required: c.obrigatorio
-            }))}
-          onSubmit={async (data) => {
-            try {
-              const pathname = window.location.pathname;
-              const matches = pathname.match(/\/cadastro\/(\d+)\/(\d+)/);
-              const categoriaId = matches?.[1];
-              const empresaId = matches?.[2];
-
-              const { error: submitError } = await supabaseClient
-                .from('gbp_cadastros')
-                .insert([
-                  {
-                    categoria_id: parseInt(categoriaId),
-                    empresa_id: parseInt(empresaId),
-                    ...data
-                  }
-                ]);
-
-              if (submitError) throw submitError;
-              router.push('/sucesso');
-            } catch (error) {
-              log('Erro ao enviar:', error);
-              setError('Erro ao enviar formulário');
-            }
-          }}
+          campos={visibleFields.map(field => ({
+            nome: field.id,
+            label: field.label,
+            type: field.type,
+            required: field.required
+          }))}
+          onSubmit={handleSubmit}
           style={formStyle}
         />
       </div>

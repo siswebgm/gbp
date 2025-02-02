@@ -27,6 +27,17 @@ export const authService = {
     try {
       console.log('Login attempt with:', { email });
 
+      // Fazer login no Supabase
+      const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (authError) {
+        console.error('Erro de autenticação:', authError);
+        throw new AuthError('Email ou senha inválidos');
+      }
+
       // Busca o usuário na tabela gbp_usuarios
       const { data: user, error } = await supabaseClient
         .from('gbp_usuarios')
@@ -42,69 +53,32 @@ export const authService = {
           status,
           ultimo_acesso,
           created_at,
-          senha,
           foto
         `)
         .eq('email', email.toString())
         .single();
 
       console.log('User data:', user);
-      console.log('Query error:', error);
 
       if (error || !user) {
-        console.error('Login error:', error);
-        throw new AuthError('Credenciais inválidas');
+        console.error('Erro ao buscar usuário:', error);
+        throw new AuthError('Usuário não encontrado');
       }
 
-      // Verifica se o usuário tem senha definida
-      if (!user.senha) {
-        throw new AuthError('Usuário sem senha definida. Entre em contato com o administrador.');
-      }
+      // Atualiza último acesso
+      await this.updateLastAccess(user.uid);
 
-      // Verifica a senha
-      if (user.senha !== password) {
-        throw new AuthError('Credenciais inválidas');
-      }
+      // Salva dados no localStorage
+      localStorage.setItem('gbp_user', JSON.stringify(user));
+      localStorage.setItem('empresa_uid', user.empresa_uid || '');
+      localStorage.setItem('user_uid', user.uid);
 
-      // Verifica o status do usuário
-      if (user.status === 'blocked') {
-        throw new AuthError('Sua conta está bloqueada. Entre em contato com o administrador.');
-      }
-
-      if (user.status === 'pending') {
-        throw new AuthError('Sua conta está pendente de aprovação. Entre em contato com o administrador.');
-      }
-
-      if (user.status !== 'active') {
-        throw new AuthError('Status da conta inválido');
-      }
-
-      // Atualiza o último acesso
-      await supabaseClient
-        .from('gbp_usuarios')
-        .update({ ultimo_acesso: new Date().toISOString() })
-        .eq('uid', user.uid);
-
-      // Retorna os dados formatados
-      return {
-        uid: user.uid,
-        nome: user.nome,
-        email: user.email,
-        cargo: user.cargo,
-        nivel_acesso: user.nivel_acesso,
-        permissoes: user.permissoes || [],
-        empresa_uid: user.empresa_uid,
-        contato: user.contato,
-        status: user.status,
-        ultimo_acesso: user.ultimo_acesso,
-        created_at: user.created_at,
-        foto: user.foto
-      };
+      return user;
     } catch (error) {
+      console.error('Login error:', error);
       if (error instanceof AuthError) {
         throw error;
       }
-      console.error('Error in login:', error);
       throw new AuthError('Erro ao fazer login');
     }
   },

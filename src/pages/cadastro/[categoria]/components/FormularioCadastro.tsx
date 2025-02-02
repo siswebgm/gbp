@@ -41,41 +41,29 @@ const unformatCPF = (value: string) => {
   return value.replace(/\D/g, '');
 };
 
-interface Field {
-  id: string;
-  label: string;
-  type: string;
-  required: boolean;
-  visible: boolean;
-  isAnexo?: boolean;
-}
-
-interface Documento {
-  id: string;
+interface Campo {
   nome: string;
-  required: boolean;
+  label?: string;
+  required?: boolean;
+  type?: string;
 }
 
 interface FormularioCadastroProps {
-  fields: Field[];
-  documentos?: Documento[];
-  onSubmit: (data: any) => void;
+  campos: Campo[];
+  onSubmit: (data: any) => Promise<void>;
   style?: {
-    title: string;
-    titleColor: string;
-    logoUrl: string;
-    theme: {
-      primaryColor: string;
-      backgroundColor: string;
-      subtitle?: string;
-      subtitleColor?: string;
+    title?: string;
+    titleColor?: string;
+    logoUrl?: string;
+    theme?: {
+      primaryColor?: string;
+      backgroundColor?: string;
     };
   };
 }
 
 export default function FormularioCadastro({
-  fields,
-  documentos = [],
+  campos,
   onSubmit,
   style = {
     title: 'Formulário de Cadastro',
@@ -92,7 +80,7 @@ export default function FormularioCadastro({
   const [fileErrors, setFileErrors] = useState<{ [key: string]: string }>({});
   const [isValidatingCPF, setIsValidatingCPF] = useState(false);
 
-  console.log('FormularioCadastro - Campos recebidos:', fields);
+  console.log('FormularioCadastro - Campos recebidos:', campos);
 
   const handleFileChange = (fieldId: string, required: boolean) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -187,32 +175,53 @@ export default function FormularioCadastro({
       // Remove a formatação do CPF antes de enviar
       const formattedData = {
         ...data,
-        cpf: data.cpf.replace(/[^\d]/g, '')
+        cpf: data.cpf?.replace(/[^\d]/g, '') || null
       };
 
-      // Verifica se todos os anexos obrigatórios foram enviados
-      const anexosObrigatorios = documentos.filter(doc => doc.required);
-      const anexosEnviados = Object.keys(uploadedFiles);
-      
-      const errosAnexos: { [key: string]: string } = {};
-      anexosObrigatorios.forEach(doc => {
-        if (!anexosEnviados.includes(doc.id)) {
-          errosAnexos[doc.id] = 'Este anexo é obrigatório';
-        }
-      });
+      // Monta o objeto com os campos exatos da tabela
+      const formData = {
+        nome: formattedData.nome || null,
+        cpf: formattedData.cpf || null,
+        nascimento: formattedData.nascimento || null,
+        whatsapp: formattedData.whatsapp?.replace(/\D/g, '') || null,
+        telefone: formattedData.telefone?.replace(/\D/g, '') || null,
+        genero: formattedData.genero || null,
+        titulo: formattedData.titulo || null,
+        zona: formattedData.zona || null,
+        secao: formattedData.secao || null,
+        cep: formattedData.cep?.replace(/\D/g, '') || null,
+        logradouro: formattedData.logradouro || null,
+        cidade: formattedData.cidade || null,
+        bairro: formattedData.bairro || null,
+        numero: formattedData.numero || null,
+        complemento: formattedData.complemento || null,
+        nome_mae: formattedData.nome_mae || null,
+        uf: formattedData.uf || null
+      };
 
-      if (Object.keys(errosAnexos).length > 0) {
-        setFileErrors(errosAnexos);
-        return;
+      // Log dos dados antes de limpar
+      console.log('Dados antes de limpar:', formData);
+
+      // Remove campos null, undefined ou vazios
+      const cleanData = Object.entries(formData).reduce((acc, [key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+          acc[key] = value;
+        }
+        return acc;
+      }, {});
+
+      // Log dos dados após limpar
+      console.log('Dados após limpar:', cleanData);
+
+      // Se houver arquivos, adiciona separadamente
+      if (Object.keys(uploadedFiles).length > 0) {
+        cleanData.files = uploadedFiles;
       }
 
-      // Combina os dados do formulário com os arquivos
-      const formData = {
-        ...formattedData,
-        files: uploadedFiles
-      };
+      // Log final dos dados
+      console.log('Dados finais do formulário:', cleanData);
 
-      onSubmit(formData);
+      await onSubmit(cleanData);
     } catch (error) {
       console.error('Erro ao enviar formulário:', error);
       setError('cpf', {
@@ -223,7 +232,7 @@ export default function FormularioCadastro({
   };
 
   // Se não houver campos visíveis, não mostra o formulário
-  if (!fields || fields.length === 0) {
+  if (!campos || campos.length === 0) {
     console.log('Nenhum campo visível para exibir');
     return (
       <div className="text-center py-4">
@@ -231,10 +240,6 @@ export default function FormularioCadastro({
       </div>
     );
   }
-
-  // Filtra apenas campos visíveis
-  const visibleFields = fields.filter(field => field.visible);
-  console.log('Campos visíveis:', visibleFields);
 
   return (
     <div style={{ 
@@ -272,103 +277,37 @@ export default function FormularioCadastro({
         }}>
           {style.title}
         </h1>
-
-        {/* Subtítulo */}
-        {style.theme?.subtitle && (
-          <p style={{
-            color: style.theme.subtitleColor || '#666666',
-            fontSize: '1.1rem',
-            margin: '0.5rem 0 0 0',
-            fontFamily: 'system-ui, -apple-system, sans-serif'
-          }}>
-            {style.theme.subtitle}
-          </p>
-        )}
       </div>
 
       {/* Formulário */}
       <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
-        {/* Campos de texto */}
-        {visibleFields
-          .filter(field => !field.isAnexo)
-          .map((field) => (
-            <div key={field.id}>
-              <MuiTextField
-                {...register(field.id, { 
-                  required: field.required,
-                  ...(field.id === 'cpf' && {
-                    onChange: async (e) => {
-                      const rawValue = e.target.value;
-                      const formattedValue = formatCPF(rawValue);
-                      
-                      // Atualiza o valor formatado no campo
-                      setValue('cpf', formattedValue);
-                      
-                      // Valida quando atingir 11 dígitos
-                      const cleanCpf = formattedValue.replace(/\D/g, '');
-                      if (cleanCpf.length === 11) {
-                        await validateCPF(cleanCpf);
-                      }
-                    }
-                  })
-                })}
-                label={field.label}
-                type={field.type}
-                required={field.required}
-                fullWidth
-                error={!!errors[field.id]}
-                helperText={errors[field.id]?.message as string}
-                inputProps={{
-                  ...(field.id === 'cpf' && {
-                    maxLength: 14,
-                    placeholder: '000.000.000-00'
-                  })
-                }}
-              />
+        {campos.map((campo) => {
+          const isAnexo = campo.nome.startsWith('ax_');
+          return (
+            <div key={campo.nome}>
+              <label>
+                {campo.label || campo.nome}
+                {campo.required && <span style={{ color: 'red' }}> *</span>}
+              </label>
+              {isAnexo ? (
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={handleFileChange(campo.nome, campo.required)}
+                  style={{ display: 'block' }}
+                  id={`file-${campo.nome}`}
+                  {...register(campo.nome, { required: campo.required })}
+                />
+              ) : (
+                <input
+                  type={campo.type || 'text'}
+                  {...register(campo.nome, { required: campo.required })}
+                  required={campo.required}
+                />
+              )}
             </div>
-          ))}
-
-        {/* Anexos */}
-        {documentos && documentos.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-xl font-semibold mb-4">Anexos</h2>
-            {documentos.map((doc) => (
-              <MuiFormControl key={doc.id} fullWidth error={!!fileErrors[doc.id]}>
-                <div className="flex items-center space-x-4 mb-4">
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={handleFileChange(doc.id, doc.required)}
-                    style={{ display: 'none' }}
-                    id={`file-${doc.id}`}
-                  />
-                  <label
-                    htmlFor={`file-${doc.id}`}
-                    className="flex items-center space-x-2 cursor-pointer"
-                  >
-                    <MuiButton
-                      variant="outlined"
-                      component="span"
-                      startIcon={<UploadFileIcon />}
-                    >
-                      {uploadedFiles[doc.id]?.name || `Anexar ${doc.nome}`}
-                    </MuiButton>
-                    {doc.required && (
-                      <span className="text-red-500 text-sm">*</span>
-                    )}
-                  </label>
-                </div>
-                {fileErrors[doc.id] && (
-                  <MuiFormHelperText error>
-                    {fileErrors[doc.id]}
-                  </MuiFormHelperText>
-                )}
-              </MuiFormControl>
-            ))}
-          </div>
-        )}
-
-        {/* Botão de envio */}
+          );
+        })}
         <div className="mt-8">
           <MuiButton
             type="submit"

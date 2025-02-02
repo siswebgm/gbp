@@ -1,419 +1,249 @@
-import React, { useState, useMemo } from 'react';
-import { useCategories } from '../../../hooks/useCategories';
-import { Modal } from '../../../components/Modal';
-import { useForm } from 'react-hook-form';
-import { categoryService } from '../../../services/categories';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { useCompanyStore } from '../../../store/useCompanyStore';
-import { Edit2, Trash2, Link as LinkIcon, Plus, Loader2, AlertCircle, X } from 'lucide-react';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { Edit2, Trash2, Plus, X, Check, Loader2, Search } from 'lucide-react';
+import { useCategorias } from '../../../hooks/useCategorias';
+import { useCategoriaTipos } from '../../../hooks/useCategoriaTipos';
+import { toast } from 'react-toastify';
 
-const categorySchema = z.object({
-  nome: z.string().min(1, 'Nome é obrigatório'),
-  descricao: z.string().optional(),
-});
-
-const ITEMS_PER_PAGE = 5;
-
-type CategoryFormData = z.infer<typeof categorySchema>;
-
-interface EditModalState {
-  isOpen: boolean;
-  category?: {
-    uid: string;
-    nome: string;
-    descricao: string | null;
-  };
+interface CategoriaFormData {
+  nome: string;
+  tipo_uid?: string;
 }
 
 export function CategorySettings() {
-  // Hooks - devem ser chamados antes de qualquer lógica condicional
-  const { categories, isLoading } = useCategories();
-  const { company } = useCompanyStore();
-  const [currentPage, setCurrentPage] = useState(1);
-  const [showModal, setShowModal] = useState(false);
-  const [editModal, setEditModal] = useState<EditModalState>({ isOpen: false });
-  const [linkCopied, setLinkCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { categorias, isLoading, create, update, delete: deleteCategoria } = useCategorias();
+  const { tipos, isLoading: isLoadingTipos } = useCategoriaTipos();
+  
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingData, setEditingData] = useState<CategoriaFormData>({
+    nome: '',
+    tipo_uid: '',
+  });
+  const [newCategoria, setNewCategoria] = useState<CategoriaFormData>({
+    nome: '',
+    tipo_uid: '',
+  });
+  const [isCreating, setIsCreating] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<CategoryFormData>({
-    resolver: zodResolver(categorySchema),
+
+  const handleStartEdit = (categoria: any) => {
+    setEditingId(categoria.uid);
+    setEditingData({
+      nome: categoria.nome,
+      tipo_uid: categoria.tipo_uid || '',
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingData({
+      nome: '',
+      tipo_uid: '',
+    });
+  };
+
+  const handleUpdate = async (uid: string) => {
+    try {
+      await update({ uid, ...editingData });
+      toast.success('Categoria atualizada com sucesso!');
+      handleCancelEdit();
+    } catch (error) {
+      console.error('Erro ao atualizar categoria:', error);
+      toast.error('Erro ao atualizar categoria');
+    }
+  };
+
+  const handleDelete = async (uid: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta categoria?')) {
+      return;
+    }
+
+    try {
+      await deleteCategoria(uid);
+      toast.success('Categoria excluída com sucesso!');
+    } catch (error) {
+      console.error('Erro ao excluir categoria:', error);
+      toast.error('Erro ao excluir categoria');
+    }
+  };
+
+  const handleCreate = async () => {
+    try {
+      await create(newCategoria);
+      toast.success('Categoria criada com sucesso!');
+      setNewCategoria({
+        nome: '',
+        tipo_uid: '',
+      });
+      setIsCreating(false);
+    } catch (error) {
+      console.error('Erro ao criar categoria:', error);
+      toast.error('Erro ao criar categoria');
+    }
+  };
+
+  const filteredCategorias = categorias?.filter((categoria) => {
+    const searchTermLower = searchTerm.toLowerCase();
+    return (
+      categoria.nome.toLowerCase().includes(searchTermLower) ||
+      tipos?.find((tipo) => tipo.uid === categoria.tipo_uid)?.nome.toLowerCase().includes(searchTermLower)
+    );
   });
 
-  // Memoized values
-  const filteredCategories = useMemo(() => {
-    if (!categories) return [];
-    return categories.filter(category => 
-      category.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (category.descricao?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    );
-  }, [categories, searchTerm]);
-
-  const totalItems = filteredCategories.length;
-  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
-  const paginatedCategories = filteredCategories.slice(startIndex, endIndex);
-
-  // Event handlers
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
-
-  const handlePreviousPage = () => {
-    setCurrentPage((prev) => Math.max(prev - 1, 1));
-  };
-
-  const handleNextPage = () => {
-    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-  };
-
-  const handleFirstPage = () => {
-    setCurrentPage(1);
-  };
-
-  const handleLastPage = () => {
-    setCurrentPage(totalPages);
-  };
-
-  const onSubmit = async (data: CategoryFormData) => {
-    try {
-      if (!company?.uid) {
-        throw new Error('Empresa não selecionada');
-      }
-
-      await categoryService.create({
-        nome: data.nome.toUpperCase(),
-        descricao: data.descricao?.toUpperCase() || null,
-        empresa_uid: company.uid,
-      });
-
-      reset();
-      setShowModal(false);
-    } catch (error) {
-      console.error('Error creating category:', error);
-      setError(error instanceof Error ? error.message : 'Erro ao criar categoria');
-    }
-  };
-
-  const handleEdit = (category: { uid: string; nome: string; descricao: string | null }) => {
-    setEditModal({ isOpen: true, category });
-    reset({ nome: category.nome, descricao: category.descricao || '' });
-  };
-
-  const handleDelete = async (categoryUid: string) => {
-    if (!company?.uid) return;
-    
-    if (window.confirm('Tem certeza que deseja excluir esta categoria?')) {
-      try {
-        await categoryService.delete(categoryUid);
-      } catch (error) {
-        console.error('Error deleting category:', error);
-        alert('Erro ao excluir categoria');
-      }
-    }
-  };
-
-  const handleGenerateLink = (categoryUid: string) => {
-    const baseUrl = window.location.origin;
-    const link = `${baseUrl}/cadastro?empresa=${company?.uid}&categoria=${categoryUid}`;
-    navigator.clipboard.writeText(link);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
-
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      {/* Header com busca e botão de adicionar */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="w-full sm:w-96">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Buscar categoria..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            />
-          </div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+          <input
+            type="text"
+            placeholder="Buscar categorias..."
+            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
         <button
-          onClick={() => setShowModal(true)}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:focus:ring-offset-gray-800"
+          onClick={() => setIsCreating(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
         >
-          <Plus className="h-5 w-5 mr-2" />
+          <Plus size={20} />
           Nova Categoria
         </button>
       </div>
 
-      {/* Mensagem de erro */}
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-start">
-          <AlertCircle className="h-5 w-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+      {isCreating && (
+        <div className="p-4 bg-white rounded-lg shadow">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Nome</label>
+              <input
+                type="text"
+                value={newCategoria.nome}
+                onChange={(e) => setNewCategoria({ ...newCategoria, nome: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Tipo</label>
+              <select
+                value={newCategoria.tipo_uid}
+                onChange={(e) => setNewCategoria({ ...newCategoria, tipo_uid: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              >
+                <option value="">Selecione um tipo</option>
+                {tipos?.map((tipo) => (
+                  <option key={tipo.uid} value={tipo.uid}>
+                    {tipo.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <button
-            onClick={() => setError(null)}
-            className="ml-3 flex-shrink-0 text-red-400 hover:text-red-500"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => setIsCreating(false)}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleCreate}
+              className="px-4 py-2 text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Criar
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Lista de categorias */}
-      <div className="bg-white dark:bg-gray-800 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-700/50">
+      {isLoading || isLoadingTipos ? (
+        <div className="flex items-center justify-center p-8">
+          <Loader2 className="animate-spin text-gray-500" size={32} />
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Nome
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Descrição
-                </th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Ações
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
               </tr>
             </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {isLoading ? (
-                [...Array(3)].map((_, index) => (
-                  <tr key={index} className="animate-pulse">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-24 ml-auto"></div>
-                    </td>
-                  </tr>
-                ))
-              ) : filteredCategories.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-6 py-4 whitespace-nowrap text-center text-gray-500 dark:text-gray-400">
-                    Nenhuma categoria encontrada
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredCategorias?.map((categoria) => (
+                <tr key={categoria.uid}>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {editingId === categoria.uid ? (
+                      <input
+                        type="text"
+                        value={editingData.nome}
+                        onChange={(e) => setEditingData({ ...editingData, nome: e.target.value })}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    ) : (
+                      <div className="text-sm text-gray-900">{categoria.nome}</div>
+                    )}
                   </td>
-                </tr>
-              ) : (
-                paginatedCategories.map((category) => (
-                  <tr key={category.uid}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                      {category.nome}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {category.descricao || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <div className="flex justify-end space-x-2">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {editingId === categoria.uid ? (
+                      <select
+                        value={editingData.tipo_uid}
+                        onChange={(e) => setEditingData({ ...editingData, tipo_uid: e.target.value })}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      >
+                        <option value="">Selecione um tipo</option>
+                        {tipos?.map((tipo) => (
+                          <option key={tipo.uid} value={tipo.uid}>
+                            {tipo.nome}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-sm text-gray-500">
+                        {tipos?.find((tipo) => tipo.uid === categoria.tipo_uid)?.nome || '-'}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    {editingId === categoria.uid ? (
+                      <div className="flex justify-end gap-2">
                         <button
-                          onClick={() => handleEdit(category)}
-                          className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                          onClick={handleCancelEdit}
+                          className="text-gray-600 hover:text-gray-900"
                         >
-                          <Edit2 className="h-5 w-5" />
+                          <X size={20} />
                         </button>
                         <button
-                          onClick={() => handleDelete(category.uid)}
-                          className="text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+                          onClick={() => handleUpdate(categoria.uid)}
+                          className="text-green-600 hover:text-green-900"
                         >
-                          <Trash2 className="h-5 w-5" />
+                          <Check size={20} />
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                    ) : (
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => handleStartEdit(categoria)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          <Edit2 size={20} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(categoria.uid)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Paginação */}
-      {filteredCategories.length > 0 && (
-        <div className="flex items-center justify-between mt-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700 dark:text-gray-400">
-              Mostrando {startIndex + 1} a {Math.min(endIndex, filteredCategories.length)} de {filteredCategories.length}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(1)}
-              disabled={currentPage === 1}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-            >
-              <ChevronsLeft className="h-5 w-5" />
-            </button>
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <span className="px-4 py-2 text-sm text-gray-700 dark:text-gray-400">
-              Página {currentPage} de {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-            <button
-              onClick={() => setCurrentPage(totalPages)}
-              disabled={currentPage === totalPages}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-50"
-            >
-              <ChevronsRight className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
       )}
-
-      {/* Modal de criação */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          reset();
-        }}
-        title="Nova Categoria"
-        size="md"
-      >
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <label htmlFor="nome" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Nome
-            </label>
-            <input
-              type="text"
-              id="nome"
-              {...register('nome')}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
-            />
-            {errors.nome && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.nome.message}</p>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="descricao" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Descrição
-            </label>
-            <textarea
-              id="descricao"
-              {...register('descricao')}
-              rows={3}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setShowModal(false);
-                reset();
-              }}
-              className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:focus:ring-offset-gray-800 disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                'Criar'
-              )}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal de edição */}
-      <Modal
-        isOpen={editModal.isOpen}
-        onClose={() => {
-          setEditModal({ isOpen: false });
-          reset();
-        }}
-        title="Editar Categoria"
-        size="md"
-      >
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <label htmlFor="nome" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Nome
-            </label>
-            <input
-              type="text"
-              id="nome"
-              {...register('nome')}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
-            />
-            {errors.nome && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.nome.message}</p>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="descricao" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Descrição
-            </label>
-            <textarea
-              id="descricao"
-              {...register('descricao')}
-              rows={3}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setEditModal({ isOpen: false });
-                reset();
-              }}
-              className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:focus:ring-offset-gray-800 disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                'Salvar'
-              )}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

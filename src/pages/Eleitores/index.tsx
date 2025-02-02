@@ -4,6 +4,7 @@ import { useCompanyStore } from '../../store/useCompanyStore';
 import { ExportarModal } from './components/ExportarModal';
 import { FiltersModal } from './components/FiltersModal';
 import { EleitoresTable } from './components/EleitoresTable';
+import { EleitoresFilters } from './components/EleitoresFilters';
 import { useEleitores } from '../../hooks/useEleitores';
 import { useEleitorOptions } from '../../hooks/useEleitorOptions';
 import { EleitorFilters, Eleitor } from '../../types/eleitor';
@@ -282,9 +283,14 @@ export function Eleitores() {
               <div className="flex items-center">
                 <Users className="h-8 w-8 text-primary-600 mr-3" />
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:truncate">
-                    Eleitores
-                  </h1>
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:truncate">
+                      Eleitores
+                    </h1>
+                    <span className="px-2.5 py-0.5 rounded-full text-sm font-medium bg-primary-100 text-primary-800 dark:bg-primary-900/20 dark:text-primary-300">
+                      {total}
+                    </span>
+                  </div>
                   <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">
                     Gerencie sua base de eleitores de forma eficiente. Adicione, edite e organize todos os seus contatos.
                   </p>
@@ -344,6 +350,13 @@ export function Eleitores() {
 
       {/* Conteúdo principal */}
       <div className="w-full">
+        <div className="mb-6">
+          <EleitoresFilters
+            filters={filters}
+            onFilterChange={handleFilterChange}
+          />
+        </div>
+        
         <div className="mb-20 md:mb-0">
           <EleitoresTable
             eleitores={eleitores?.map(e => ({

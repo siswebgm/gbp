@@ -67,6 +67,11 @@ interface Category {
   descricao: string;
   empresa_uid: string;
   created_at: string;
+  tipo_uid: string;
+  tipo?: {
+    uid: string;
+    nome: string;
+  };
 }
 
 const StyledCard = styled(Card)(({ theme }) => ({
@@ -137,6 +142,8 @@ export default function GerenciarFormulario() {
   const company = useCompanyStore((state) => state.company);
   const [categorias, setCategorias] = useState<Category[]>([]);
   const [selectedCategoria, setSelectedCategoria] = useState<string>('');
+  const [tiposCategorias, setTiposCategorias] = useState<{uid: string; nome: string}[]>([]);
+  const [selectedTipo, setSelectedTipo] = useState<string>('');
   const [formConfigs, setFormConfigs] = useState<FormConfig[]>([]);
   const [pendingChanges, setPendingChanges] = useState<FormConfig | null>(null);
   const [formularioAtivo, setFormularioAtivo] = useState(false);
@@ -247,30 +254,38 @@ export default function GerenciarFormulario() {
   }, [formTitle, formTitleColor, formLogoUrl, themePrimaryColor, themeBackgroundColor, themeSubtitle, themeSubtitleColor]);
 
   // Carregar categorias
+  const loadCategorias = async () => {
+    try {
+      setIsLoading(true);
+      const { data: categorias, error: categoriasError } = await supabaseClient
+        .from('gbp_categorias')
+        .select(`
+          uid, 
+          nome, 
+          descricao, 
+          empresa_uid, 
+          created_at,
+          tipo_uid,
+          tipo:gbp_categoria_tipos(uid, nome)
+        `)
+        .eq('empresa_uid', company?.uid)
+        .order('nome');
+
+      if (categoriasError) throw categoriasError;
+      setCategorias(categorias || []);
+    } catch (error) {
+      console.error('Erro ao carregar categorias:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar as categorias",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadCategorias = async () => {
-      try {
-        setIsLoading(true);
-        const { data: categorias, error: categoriasError } = await supabaseClient
-          .from('gbp_categorias')
-          .select('uid, nome, descricao, empresa_uid, created_at')
-          .eq('empresa_uid', company?.uid)
-          .order('nome');
-
-        if (categoriasError) throw categoriasError;
-        setCategorias(categorias || []);
-      } catch (error) {
-        console.error('Erro ao carregar categorias:', error);
-        toast({
-          title: "Erro",
-          description: "Não foi possível carregar as categorias",
-          variant: "destructive",
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     if (company?.uid) {
       loadCategorias();
     }
@@ -431,23 +446,6 @@ export default function GerenciarFormulario() {
 
       if (!selectedCategoria || !company?.uid) {
         throw new Error('Categoria ou empresa não selecionada');
-      }
-
-      // Verifica se a categoria existe
-      const { data: categoriaExiste, error: categoriaError } = await supabaseClient
-        .from('gbp_categorias')
-        .select('uid')
-        .eq('uid', selectedCategoria)
-        .eq('empresa_uid', company.uid)
-        .maybeSingle();
-
-      if (categoriaError) {
-        console.error('Erro ao verificar categoria:', categoriaError);
-        throw new Error('Erro ao verificar categoria');
-      }
-
-      if (!categoriaExiste) {
-        throw new Error('A categoria selecionada não existe ou foi removida');
       }
 
       // Garante que campos_config é um array de strings
@@ -681,6 +679,71 @@ export default function GerenciarFormulario() {
     }
   };
 
+  // Carregar tipos de categorias
+  useEffect(() => {
+    const loadTiposCategorias = async () => {
+      try {
+        setIsLoading(true);
+        const { data: tipos, error } = await supabaseClient
+          .from('gbp_categoria_tipos')
+          .select('uid, nome')
+          .eq('empresa_uid', company?.uid)
+          .order('nome');
+
+        if (error) throw error;
+        setTiposCategorias(tipos || []);
+      } catch (error) {
+        console.error('Erro ao carregar tipos de categorias:', error);
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar os tipos de categorias",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (company?.uid) {
+      loadTiposCategorias();
+    }
+  }, [company?.uid]);
+
+  // Atualizar lista de categorias quando selecionar um tipo
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        setIsLoading(true);
+        const query = supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao, empresa_uid, created_at, tipo_uid')
+          .eq('empresa_uid', company?.uid);
+
+        if (selectedTipo) {
+          query.eq('tipo_uid', selectedTipo);
+        }
+
+        const { data: categorias, error: categoriasError } = await query.order('nome');
+
+        if (categoriasError) throw categoriasError;
+        setCategorias(categorias || []);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar as categorias",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (company?.uid) {
+      loadCategorias();
+    }
+  }, [company?.uid, selectedTipo]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -763,6 +826,54 @@ export default function GerenciarFormulario() {
                   </p>
                 </div>
                 <FormControl fullWidth size="medium">
+                  <InputLabel id="tipo-select-label">Tipo de Categoria</InputLabel>
+                  <Select
+                    labelId="tipo-select-label"
+                    value={selectedTipo}
+                    label="Tipo de Categoria"
+                    onChange={(e) => {
+                      setSelectedTipo(e.target.value);
+                      setSelectedCategoria(''); // Limpa a categoria selecionada
+                    }}
+                    sx={{
+                      '& .MuiSelect-select': {
+                        padding: '14px',
+                      },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#2563eb',
+                      },
+                      marginBottom: 2
+                    }}
+                  >
+                    <MenuItem value="">
+                      <em>Todos os tipos</em>
+                    </MenuItem>
+                    {tiposCategorias.map((tipo) => (
+                      <MenuItem 
+                        key={tipo.uid} 
+                        value={tipo.uid}
+                        sx={{
+                          '&:hover': {
+                            backgroundColor: '#eff6ff',
+                          },
+                          '&.Mui-selected': {
+                            backgroundColor: '#bfdbfe',
+                            '&:hover': {
+                              backgroundColor: '#93c5fd',
+                            },
+                          },
+                        }}
+                      >
+                        <div className="flex items-center py-1">
+                          <CategoryOutlined className="w-5 h-5 mr-2 text-blue-600" />
+                          <span>{tipo.nome}</span>
+                        </div>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth size="medium">
                   <InputLabel id="categoria-select-label">Categoria</InputLabel>
                   <Select
                     labelId="categoria-select-label"
@@ -797,9 +908,16 @@ export default function GerenciarFormulario() {
                           },
                         }}
                       >
-                        <div className="flex items-center py-1">
-                          <CategoryOutlined className="w-5 h-5 mr-2 text-blue-600" />
-                          <span>{categoria.nome}</span>
+                        <div className="flex items-center justify-between w-full py-1">
+                          <div className="flex items-center">
+                            <CategoryOutlined className="w-5 h-5 mr-2 text-blue-600" />
+                            <span>{categoria.nome}</span>
+                          </div>
+                          {categoria.tipo && (
+                            <span className="text-sm text-gray-500 ml-2">
+                              {categoria.tipo.nome}
+                            </span>
+                          )}
                         </div>
                       </MenuItem>
                     ))}

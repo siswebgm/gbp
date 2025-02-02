@@ -5,6 +5,10 @@ import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../hooks/useToast';
 import { supabaseClient } from '../../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useCompanyStore } from '../../store/useCompanyStore';
+import { useAuthStore } from '../../store/useAuthStore';
+import { MessageTag } from '../../components/MessageTag';
+import { GreetingMenu } from '../../components/GreetingMenu';
 
 interface FilterOption {
   id: string;
@@ -19,22 +23,200 @@ interface MediaFile {
   previewUrl: string;
 }
 
+const STORAGE_BUCKET = 'uploads';
+
+const MAX_FILE_SIZE = 70 * 1024 * 1024; // 70MB
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB por chunk para arquivos grandes
+
+// Função para sanitizar strings (remover caracteres especiais)
+const sanitizeString = (str: string): string => {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9]+/g, '') // Remove caracteres especiais
+    .trim();
+};
+
+// Função para sanitizar nomes de arquivo
+const sanitizeFileName = (fileName: string): string => {
+  return fileName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9]+/g, '_') // Substitui caracteres especiais por underscore
+    .trim();
+};
+
+const uploadInChunks = async (file: File, fileName: string, bucketName: string): Promise<string> => {
+  console.log('Iniciando upload em chunks:', {
+    tamanhoTotal: `${(file.size / (1024 * 1024)).toFixed(2)}MB`,
+    tamanhoChunk: `${(CHUNK_SIZE / (1024 * 1024)).toFixed(2)}MB`,
+    numeroChunks: Math.ceil(file.size / CHUNK_SIZE)
+  });
+
+  const chunks: Blob[] = [];
+  let uploadedSize = 0;
+
+  // Dividir arquivo em chunks
+  for (let start = 0; start < file.size; start += CHUNK_SIZE) {
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    chunks.push(file.slice(start, end));
+  }
+
+  console.log(`Arquivo dividido em ${chunks.length} chunks`);
+
+  try {
+    // Upload do primeiro chunk
+    console.log('Enviando primeiro chunk...');
+    const { error: uploadError } = await supabaseClient.storage
+      .from(bucketName)
+      .upload(fileName, chunks[0], {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type
+      });
+
+    if (uploadError) {
+      console.error('Erro no primeiro chunk:', uploadError);
+      throw uploadError;
+    }
+
+    uploadedSize += chunks[0].size;
+    console.log(`Progresso: ${Math.round((uploadedSize / file.size) * 100)}%`);
+
+    // Upload dos chunks restantes
+    for (let i = 1; i < chunks.length; i++) {
+      console.log(`Enviando chunk ${i + 1} de ${chunks.length}...`);
+      const { error: appendError } = await supabaseClient.storage
+        .from(bucketName)
+        .upload(fileName, chunks[i], {
+          upsert: true,
+          contentType: file.type
+        });
+
+      if (appendError) {
+        console.error(`Erro no chunk ${i + 1}:`, appendError);
+        throw appendError;
+      }
+
+      uploadedSize += chunks[i].size;
+      console.log(`Progresso: ${Math.round((uploadedSize / file.size) * 100)}%`);
+    }
+
+    console.log('Upload em chunks concluído com sucesso');
+
+    // Retornar URL pública
+    const { data: { publicUrl } } = supabaseClient.storage
+      .from(bucketName)
+      .getPublicUrl(fileName);
+
+    return publicUrl;
+  } catch (error) {
+    console.error('Erro no upload em chunks:', error);
+    throw error;
+  }
+};
+
+const uploadFile = async (file: File, fileName: string, empresaNome: string): Promise<string> => {
+  try {
+    if (!empresaNome) {
+      throw new Error('Nome da empresa não encontrado. Por favor, recarregue a página.');
+    }
+
+    // Verificar tamanho do arquivo
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`Arquivo muito grande. O tamanho máximo permitido é ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+    }
+
+    // Sanitizar o nome do bucket
+    const bucketName = sanitizeString(empresaNome);
+
+    // Criar o nome do arquivo sanitizado com timestamp
+    const timestamp = Date.now();
+    const fileExt = fileName.split('.').pop();
+    const baseFileName = sanitizeFileName(fileName.substring(0, fileName.lastIndexOf('.')));
+    const newFileName = `${timestamp}-${baseFileName}.${fileExt}`;
+    
+    console.log('Tentando upload do arquivo:', {
+      nome: newFileName,
+      tamanho: `${(file.size / (1024 * 1024)).toFixed(2)}MB`,
+      tipo: file.type,
+      bucket: bucketName
+    });
+
+    // Para arquivos maiores que 5MB, usar upload em chunks direto
+    if (file.size > 5 * 1024 * 1024) {
+      console.log('Arquivo grande detectado, usando upload em chunks...');
+      return await uploadInChunks(file, newFileName, bucketName);
+    }
+
+    // Para arquivos pequenos, tentar upload normal
+    const { data: uploadData, error: uploadError } = await supabaseClient.storage
+      .from(bucketName)
+      .upload(newFileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type
+      });
+
+    if (uploadError) {
+      console.error('Erro detalhado do upload:', uploadError);
+      
+      if (uploadError.message?.includes('Bucket not found')) {
+        throw new Error(`Bucket '${bucketName}' não encontrado. Por favor, verifique as configurações de armazenamento.`);
+      }
+      
+      if (uploadError.statusCode === 500) {
+        console.log('Erro 500 detectado, tentando upload em chunks como fallback...');
+        return await uploadInChunks(file, newFileName, bucketName);
+      }
+      
+      throw new Error('Erro ao fazer upload do arquivo: ' + uploadError.message);
+    }
+
+    const { data: { publicUrl } } = supabaseClient.storage
+      .from(bucketName)
+      .getPublicUrl(uploadData.path);
+
+    console.log('Upload concluído com sucesso:', publicUrl);
+    return publicUrl;
+  } catch (error) {
+    console.error('Erro no upload:', error);
+    throw error;
+  }
+};
+
 export function DisparoMidia() {
+  const company = useCompanyStore((state) => state.company);
+  const user = useAuthStore((state) => state.user);
   const [message, setMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
   const [selectedFilters, setSelectedFilters] = useState<FilterOption[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
+  const [status, setStatus] = useState<{
+    success: boolean;
+    message: string;
+  }>({ success: false, message: '' });
+  const [showProgress, setShowProgress] = useState(false);
+  const [progress, setProgress] = useState<{
+    step: string;
+    detail: string;
+    status: 'loading' | 'success' | 'error';
+  }>({ step: '', detail: '', status: 'loading' });
   const [showEmojis, setShowEmojis] = useState(false);
-  const [includeUserName, setIncludeUserName] = useState(true);
   const [showGreetings, setShowGreetings] = useState(false);
-  const [selectedGreeting, setSelectedGreeting] = useState('Olá {nome_eleitor}. Tudo bem?');
+  const [includeUserName, setIncludeUserName] = useState(true);
+  const [selectedGreeting, setSelectedGreeting] = useState<string | null>('Olá {nome_eleitor}. Tudo bem?');
+  const [categorias, setCategorias] = useState<FilterOption[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, FilterOption[]>>({
     cidade: [],
     bairro: [],
     categoria: [],
     genero: [
-      { id: '1', label: 'Masculino', value: 'masculino', type: 'genero' },
-      { id: '2', label: 'Feminino', value: 'feminino', type: 'genero' },
+      { id: '1', value: 'masculino', label: 'Masculino', type: 'genero' },
+      { id: '2', value: 'feminino', label: 'Feminino', type: 'genero' },
     ],
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -43,6 +225,8 @@ export function DisparoMidia() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState<any>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [totalProgress, setTotalProgress] = useState(0);
   const navigate = useNavigate();
 
   const greetings = [
@@ -53,6 +237,26 @@ export function DisparoMidia() {
     { id: 5, text: 'Boa tarde' },
     { id: 6, text: 'Boa noite' },
   ];
+
+  const handleRemoveTag = () => {
+    setSelectedGreeting(null);
+    // Clear the greeting from the message if it exists at the start
+    setMessage(prevMessage => {
+      const lines = prevMessage.split('\n');
+      if (lines[0].includes('{nome_eleitor}')) {
+        // Remove the first line and any empty lines that follow
+        while (lines.length > 0 && !lines[0].trim()) {
+          lines.shift();
+        }
+        return lines.join('\n');
+      }
+      return prevMessage;
+    });
+  };
+
+  const handleEditTag = (newTag: string) => {
+    setSelectedGreeting(newTag);
+  };
 
   useEffect(() => {
     const fetchTotalEleitores = async () => {
@@ -86,80 +290,1795 @@ export function DisparoMidia() {
   }, []);
 
   useEffect(() => {
-    // Set initial message with default greeting
-    setMessage('Olá {nome_eleitor}. Tudo bem?\n\n');
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
   }, []);
 
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
-        // Buscar cidades únicas
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
         const { data: cidadesData, error: cidadesError } = await supabaseClient
           .from('gbp_eleitores')
           .select('cidade')
+          .eq('empresa_uid', empresaUid)
           .not('cidade', 'is', null)
           .not('cidade', 'eq', '')
           .order('cidade');
 
-        if (cidadesError) throw cidadesError;
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
 
-        // Buscar bairros únicos
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
         const { data: bairrosData, error: bairrosError } = await supabaseClient
           .from('gbp_eleitores')
           .select('bairro')
+          .eq('empresa_uid', empresaUid)
           .not('bairro', 'is', null)
           .not('bairro', 'eq', '')
           .order('bairro');
 
-        if (bairrosError) throw bairrosError;
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
 
-        // Buscar categorias da tabela de categorias
-        const { data: categoriasData, error: categoriasError } = await supabaseClient
-          .from('gbp_categorias')
-          .select('uid, nome')
-          .order('nome');
-
-        if (categoriasError) throw categoriasError;
+        console.log('Bairros encontrados:', bairrosData);
 
         // Remover duplicatas e formatar os dados
         const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
-          .map((cidade, index) => ({
-            id: `cidade-${index}`,
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
             label: cidade,
-            value: cidade.toLowerCase(),
+            value: cidade,
             type: 'cidade' as const
           }));
 
         const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
-          .map((bairro, index) => ({
-            id: `bairro-${index}`,
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
             label: bairro,
-            value: bairro.toLowerCase(),
+            value: bairro,
             type: 'bairro' as const
           }));
 
-        // Formatar categorias (não precisa remover duplicatas pois vem da tabela de categorias)
-        const categorias = categoriasData.map(categoria => ({
-          id: categoria.uid,
-          label: categoria.nome,
-          value: categoria.uid,
-          type: 'categoria' as const
-        }));
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
 
         setFilterOptions(prev => ({
           ...prev,
           cidade: uniqueCidades,
-          bairro: uniqueBairros,
-          categoria: categorias
+          bairro: uniqueBairros
         }));
 
       } catch (error) {
         console.error('Erro ao carregar opções de filtro:', error);
-        showToast({
-          title: 'Erro',
-          description: 'Não foi possível carregar as opções de filtro',
-          type: 'error'
-        });
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
+      }
+    };
+
+    fetchFilterOptions();
+  }, [showToast]);
+
+  useEffect(() => {
+    const fetchTotalEleitores = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Buscar o total de eleitores diretamente do Supabase
+        const { count, error: supabaseError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('*', { count: 'exact', head: true });
+
+        if (supabaseError) {
+          console.error('Erro ao buscar total:', supabaseError);
+          setError('Erro ao buscar total de eleitores');
+          setTotalEleitores(0);
+          return;
+        }
+
+        setTotalEleitores(count || 0);
+      } catch (err) {
+        console.error('Erro ao buscar total:', err);
+        setError('Erro ao buscar total de eleitores');
+        setTotalEleitores(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTotalEleitores();
+  }, []);
+
+  useEffect(() => {
+    // Remove default greeting initialization
+    setMessage('');
+  }, []);
+
+  useEffect(() => {
+    setFilterOptions(prev => ({
+      ...prev,
+      categoria: categorias
+    }));
+  }, [categorias]);
+
+  useEffect(() => {
+    const loadCategorias = async () => {
+      try {
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar empresa_uid do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select('empresa_uid')
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa_uid) {
+          console.error('Erro ao buscar usuário:', userError);
+          return;
+        }
+
+        console.log('Buscando categorias para empresa:', userData.empresa_uid);
+
+        // Buscar categorias da empresa
+        const { data: categoriasData, error: categoriasError } = await supabaseClient
+          .from('gbp_categorias')
+          .select('uid, nome, descricao')
+          .eq('empresa_uid', userData.empresa_uid)
+          .order('nome');
+
+        if (categoriasError) {
+          console.error('Erro ao buscar categorias:', categoriasError);
+          return;
+        }
+
+        console.log('Categorias encontradas:', categoriasData);
+
+        // Converter para o formato FilterOption
+        const categoriasFormatted: FilterOption[] = categoriasData.map(cat => ({
+          id: cat.uid,
+          value: cat.uid,
+          label: cat.nome,
+          type: 'categoria'
+        }));
+
+        console.log('Categorias formatadas:', categoriasFormatted);
+
+        setCategorias(categoriasFormatted);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+        showToast('Erro ao carregar categorias', 'error');
+      }
+    };
+
+    loadCategorias();
+  }, []);
+
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        // Buscar empresa_uid do usuário atual
+        const authStore = useAuthStore.getState();
+        const user = authStore.getStoredUser();
+        
+        if (!user?.uid) {
+          console.error('Usuário não autenticado');
+          return;
+        }
+
+        // Buscar dados da empresa do usuário
+        const { data: userData, error: userError } = await supabaseClient
+          .from('gbp_usuarios')
+          .select(`
+            empresa_uid,
+            empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+              uid
+            )
+          `)
+          .eq('uid', user.uid)
+          .single();
+
+        if (userError || !userData?.empresa) {
+          console.error('Erro ao buscar empresa:', userError);
+          return;
+        }
+
+        const empresaUid = userData.empresa.uid;
+        console.log('Buscando dados para empresa UID:', empresaUid);
+
+        // Buscar cidades únicas da empresa
+        const { data: cidadesData, error: cidadesError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('cidade')
+          .eq('empresa_uid', empresaUid)
+          .not('cidade', 'is', null)
+          .not('cidade', 'eq', '')
+          .order('cidade');
+
+        if (cidadesError) {
+          console.error('Erro ao buscar cidades:', cidadesError);
+          return;
+        }
+
+        console.log('Cidades encontradas:', cidadesData);
+
+        // Buscar bairros únicos da empresa
+        const { data: bairrosData, error: bairrosError } = await supabaseClient
+          .from('gbp_eleitores')
+          .select('bairro')
+          .eq('empresa_uid', empresaUid)
+          .not('bairro', 'is', null)
+          .not('bairro', 'eq', '')
+          .order('bairro');
+
+        if (bairrosError) {
+          console.error('Erro ao buscar bairros:', bairrosError);
+          return;
+        }
+
+        console.log('Bairros encontrados:', bairrosData);
+
+        // Remover duplicatas e formatar os dados
+        const uniqueCidades = Array.from(new Set(cidadesData.map(item => item.cidade)))
+          .filter(cidade => cidade && cidade.trim()) // Remove valores vazios
+          .map(cidade => ({
+            id: cidade,
+            label: cidade,
+            value: cidade,
+            type: 'cidade' as const
+          }));
+
+        const uniqueBairros = Array.from(new Set(bairrosData.map(item => item.bairro)))
+          .filter(bairro => bairro && bairro.trim()) // Remove valores vazios
+          .map(bairro => ({
+            id: bairro,
+            label: bairro,
+            value: bairro,
+            type: 'bairro' as const
+          }));
+
+        console.log('Cidades formatadas:', uniqueCidades);
+        console.log('Bairros formatadas:', uniqueBairros);
+
+        setFilterOptions(prev => ({
+          ...prev,
+          cidade: uniqueCidades,
+          bairro: uniqueBairros
+        }));
+
+      } catch (error) {
+        console.error('Erro ao carregar opções de filtro:', error);
+        showToast('Erro ao carregar opções de filtro', 'error');
       }
     };
 
@@ -282,8 +2201,10 @@ export function DisparoMidia() {
     // Restaura o foco e move o cursor após o emoji
     setTimeout(() => {
       textarea.focus();
-      const newCursorPos = start + emoji.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.setSelectionRange(
+        start + emoji.length,
+        start + emoji.length
+      );
     }, 0);
   };
 
@@ -320,8 +2241,19 @@ export function DisparoMidia() {
   };
 
   const handleAddFilter = (filter: FilterOption) => {
-    if (!selectedFilters.find(f => f.id === filter.id && f.type === filter.type)) {
-      setSelectedFilters([...selectedFilters, filter]);
+    // Se for um filtro de gênero, remove qualquer outro filtro de gênero existente
+    if (filter.type === 'genero') {
+      setSelectedFilters(prev => prev.filter(f => f.type !== 'genero').concat(filter));
+    } else {
+      // Para outros tipos, mantém o comportamento normal
+      setSelectedFilters(prev => {
+        // Verifica se o filtro já existe
+        const exists = prev.some(f => f.id === filter.id);
+        if (!exists) {
+          return [...prev, filter];
+        }
+        return prev;
+      });
     }
   };
 
@@ -329,211 +2261,119 @@ export function DisparoMidia() {
     setSelectedFilters(selectedFilters.filter(f => !(f.id === filter.id && f.type === filter.type)));
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     setShowConfirm(true);
-  };
-
-  const uploadFile = (file: File, fileName: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const timestamp = new Date().getTime();
-      const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
-      const isImage = file.type.startsWith('image/');
-      const isVideo = file.type.startsWith('video/');
-      
-      // Validate file type and size
-      if (!isImage && !isVideo) {
-        reject(new Error('Tipo de arquivo não suportado. Apenas imagens e vídeos são permitidos.'));
-        return;
-      }
-
-      const maxSize = 100 * 1024 * 1024; // 100MB
-      if (file.size > maxSize) {
-        reject(new Error('Arquivo muito grande. O tamanho máximo permitido é 100MB.'));
-        return;
-      }
-
-      const fileType = isImage ? 'img' : isVideo ? 'vid' : 'file';
-      const finalFileName = `${fileType}_${timestamp}.${fileExt}`;
-
-      const formData = new FormData();
-      formData.append('mimetype', file.type);
-      formData.append('extensao', fileExt);
-      formData.append('arquivo_nome', finalFileName);
-      formData.append('empresa', 'gbp');
-      formData.append('file', file, finalFileName);
-
-      console.log('Preparando upload:', {
-        nome: finalFileName,
-        tipo: file.type,
-        tamanho: `${(file.size / (1024 * 1024)).toFixed(2)}MB`,
-        extensao: fileExt
-      });
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', 'https://whkn8n.guardia.work/webhook/gbp_midia', true);
-      
-      // Enhanced headers
-      xhr.setRequestHeader('Accept', 'application/json');
-      xhr.setRequestHeader('Authorization', 'Bearer gbp_token');
-      xhr.setRequestHeader('X-File-Name', finalFileName);
-      xhr.setRequestHeader('X-File-Type', file.type);
-      xhr.setRequestHeader('X-File-Size', file.size.toString());
-
-      // Progress tracking
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const percentComplete = ((e.loaded / e.total) * 100).toFixed(2);
-          console.log(`Upload progress for ${finalFileName}: ${percentComplete}%`);
-        }
-      };
-
-      xhr.onload = function() {
-        const responseLog = {
-          status: xhr.status,
-          responseText: xhr.responseText,
-          responseType: xhr.responseType,
-          responseHeaders: xhr.getAllResponseHeaders(),
-          requestHeaders: {
-            'Content-Type': xhr.getRequestHeader('Content-Type'),
-            'Authorization': 'Bearer [REDACTED]',
-            'Accept': xhr.getRequestHeader('Accept')
-          }
-        };
-        
-        console.log('Resposta completa:', responseLog);
-
-        if (xhr.status === 200) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            console.log('Resposta parseada:', response);
-            
-            const url = response.ulrPublica;
-            
-            if (url) {
-              resolve(url);
-            } else {
-              console.error('URL não encontrada:', {
-                response,
-                fileName: finalFileName
-              });
-              reject(new Error(`URL não encontrada na resposta para ${finalFileName}`));
-            }
-          } catch (e) {
-            console.error('Erro ao processar resposta:', {
-              error: e,
-              responseText: xhr.responseText,
-              fileName: finalFileName
-            });
-            reject(new Error(`Erro ao processar resposta do servidor para ${finalFileName}`));
-          }
-        } else {
-          let errorMessage;
-          try {
-            const errorResponse = JSON.parse(xhr.responseText);
-            errorMessage = errorResponse.message || 'Erro desconhecido';
-          } catch (e) {
-            errorMessage = xhr.responseText || 'Erro desconhecido';
-          }
-
-          console.error('Erro no upload:', {
-            status: xhr.status,
-            response: xhr.responseText,
-            message: errorMessage,
-            fileName: finalFileName,
-            fileType: file.type,
-            fileSize: file.size
-          });
-          
-          reject(new Error(`Erro no upload do arquivo ${finalFileName}. Status: ${xhr.status}. Erro: ${errorMessage}`));
-        }
-      };
-
-      xhr.onerror = function() {
-        console.error('Erro de rede:', {
-          status: xhr.status,
-          statusText: xhr.statusText,
-          fileName: finalFileName
-        });
-        reject(new Error(`Erro de rede ao enviar arquivo ${finalFileName}`));
-      };
-
-      xhr.send(formData);
-    });
   };
 
   const confirmSend = async () => {
     try {
-      setLoading(true);
-
-      // Upload de cada arquivo
-      const uploadPromises = mediaFiles.map(async (media) => {
-        // Simplificar o nome do arquivo removendo caracteres especiais
-        const fileName = media.file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        
-        try {
-          console.log('Enviando arquivo:', {
-            nome: fileName,
-            tipo: media.file.type,
-            tamanho: media.file.size,
-            extensao: fileName.split('.').pop() || ''
-          });
-
-          return await uploadFile(media.file, fileName);
-        } catch (error) {
-          console.error('Erro detalhado no upload:', error);
-          throw error;
-        }
+      setShowConfirm(false);
+      setShowProgress(true);
+      setProgress({
+        step: 'Iniciando processo',
+        detail: 'Verificando autenticação...',
+        status: 'loading'
       });
 
-      // Aguarda todos os uploads terminarem
-      const uploadUrls = await Promise.all(uploadPromises);
-
-      console.log('URLs dos uploads:', uploadUrls);
-
-      // Salva o registro do disparo no Supabase
-      const { data: disparoData, error: insertError } = await supabaseClient
-        .from('gbp_disparo')
-        .insert({
-          empresa_uid: null, // Ajuste conforme necessário
-          upload: uploadUrls,
-          categoria: selectedFilters.find(f => f.type === 'categoria')?.value || null,
-          bairro: selectedFilters.find(f => f.type === 'bairro')?.value || null,
-          cidade: selectedFilters.find(f => f.type === 'cidade')?.value || null,
-          nome_disparo: includeUserName,
-          qtde: totalEleitores,
-        })
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('Erro ao inserir no Supabase:', insertError);
-        throw insertError;
+      // Verificar autenticação usando AuthStore
+      const authStore = useAuthStore.getState();
+      const user = authStore.getStoredUser();
+      
+      if (!user?.uid) {
+        throw new Error('Usuário não está autenticado. Por favor, faça login novamente.');
       }
 
-      console.log('Disparo salvo com sucesso:', disparoData);
-
-      showToast({
-        title: 'Sucesso',
-        description: 'Mensagem enviada com sucesso!',
-        type: 'success'
+      setProgress({
+        step: 'Verificando dados',
+        detail: 'Buscando informações do usuário...',
+        status: 'loading'
       });
 
-      // Limpa o formulário
-      setShowConfirm(false);
-      setMessage('');
-      setMediaFiles([]);
-      setSelectedFilters([]);
+      // Buscar dados do usuário incluindo nome
+      const { data: userData, error: userError } = await supabaseClient
+        .from('gbp_usuarios')
+        .select(`
+          nome,
+          empresa_uid,
+          empresa:gbp_empresas!gbp_usuarios_empresa_uid_fkey (
+            uid
+          )
+        `)
+        .eq('uid', user.uid)
+        .single();
+
+      if (userError) {
+        throw new Error('Não foi possível carregar seus dados. Por favor, tente novamente.');
+      }
+
+      setProgress({
+        step: 'Preparando mensagem',
+        detail: 'Processando informações...',
+        status: 'loading'
+      });
+
+      // Pegar o texto exato da tag de mensagem
+      const saudacao = "Olá {nome_eleitor}. Tudo bem?";
+      const qtde = totalEleitores || 0;
+      const nome_disparo = message.includes('{nome_eleitor}');
+
+      setProgress({
+        step: 'Salvando',
+        detail: 'Registrando mensagem no banco de dados...',
+        status: 'loading'
+      });
+
+      // Inserir o disparo no banco
+      const { error: insertError } = await supabaseClient
+        .from('gbp_disparo')
+        .insert({
+          disparo_id: Date.now(),
+          empresa_uid: userData.empresa.uid,
+          empresa_nome: userData.empresa.nome,
+          token: userData.empresa.token,
+          instancia: userData.empresa.instancia || "whatsapp",
+          porta: userData.empresa.porta || "8080",
+          upload: mediaFiles.length > 0 ? mediaFiles.map(media => media.previewUrl) : null,
+          categoria: categorias.length > 0 ? categorias.map(cat => cat.label) : null,
+          mensagem: message,
+          usuario_uid: userData.nome,
+          bairro: selectedFilters.filter(f => f.type === 'bairro').map(f => f.value),
+          cidade: selectedFilters.filter(f => f.type === 'cidade').map(f => f.value),
+          nome_disparo,
+          qtde,
+          saudacao
+        });
+
+      if (insertError) {
+        throw new Error('Não foi possível salvar a mensagem. Por favor, tente novamente.');
+      }
+
+      // Atualizar progresso com sucesso
+      setProgress({
+        step: 'Concluído',
+        detail: 'Mensagem registrada com sucesso!',
+        status: 'success'
+      });
+
+      // Aguardar 2 segundos antes de resetar
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Resetar o formulário
+      resetForm();
 
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
-      showToast({
-        title: 'Erro',
-        description: error instanceof Error ? error.message : 'Ocorreu um erro ao enviar a mensagem. Tente novamente.',
-        type: 'error'
+      setProgress({
+        step: 'Erro',
+        detail: error instanceof Error ? error.message : 'Erro ao processar sua solicitação',
+        status: 'error'
       });
-    } finally {
-      setLoading(false);
     }
+  };
+
+  // Atualizar o progresso do upload em chunks
+  const onUploadProgress = (progress: number) => {
+    setUploadProgress(progress);
   };
 
   // Função para formatar o texto com markdown do WhatsApp
@@ -555,6 +2395,16 @@ export function DisparoMidia() {
     formattedText = formattedText.replace(/```(.*?)```/g, '<code>$1</code>');
 
     return formattedText;
+  };
+
+  const resetForm = () => {
+    setMessage('');
+    setMediaFiles([]);
+    setSelectedFilters([]);
+    setShowConfirm(false);
+    setShowProgress(false);
+    setProgress({ step: '', detail: '', status: 'loading' });
+    setMessage('');
   };
 
   return (
@@ -592,7 +2442,7 @@ export function DisparoMidia() {
                 <button
                   onClick={handleSend}
                   disabled={!message && mediaFiles.length === 0}
-                  className="w-full sm:w-auto inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                 >
                   <Send className="h-4 w-4 mr-2" />
                   Enviar Mensagem
@@ -604,54 +2454,220 @@ export function DisparoMidia() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4">
             {/* Filtros */}
             <Card className="lg:col-span-3 order-2 lg:order-1">
-              <div className="p-3 md:p-4">
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Filter className="h-5 w-5" />
-                  Filtros
-                </h2>
-                
-                {/* Filtros selecionados */}
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {selectedFilters.map(filter => (
-                    <span
-                      key={`${filter.type}-${filter.id}`}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm bg-primary-100 text-primary-800"
-                    >
-                      {filter.label}
-                      <button
-                        onClick={() => handleRemoveFilter(filter)}
-                        className="hover:text-primary-600"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-
-                {/* Seleção de filtros */}
-                <div className="space-y-4">
-                  {Object.entries(filterOptions).map(([key, options]) => (
-                    <div key={key}>
-                      <label className="block text-sm font-medium mb-1 capitalize">
-                        {key}
-                      </label>
-                      <select
-                        onChange={(e) => {
-                          const option = options.find(o => o.id === e.target.value);
-                          if (option) handleAddFilter(option);
-                        }}
-                        className="w-full p-2 border rounded-md"
-                        value=""
-                      >
-                        <option value="">Selecione...</option>
-                        {options.map(option => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+              <div className="flex flex-col gap-4 p-4">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-5 h-5 text-primary" />
+                      <h2 className="text-lg font-semibold">Filtros</h2>
                     </div>
-                  ))}
+                    <span className="text-sm font-medium text-primary">
+                      {selectedFilters.length} selecionado(s)
+                    </span>
+                  </div>
+
+                  {/* Campos de filtro com tags */}
+                  <div className="grid gap-4">
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <Users className="w-4 h-4" />
+                        Cidade
+                      </label>
+                      <div className="relative">
+                        <div className="w-full border rounded-xl focus-within:ring-2 focus-within:ring-primary/50 bg-white shadow-sm">
+                          {/* Container para as tags com scroll */}
+                          <div className="max-h-[120px] overflow-y-auto scrollbar-thin">
+                            <div className="flex flex-wrap gap-2 p-3">
+                              {selectedFilters.filter(f => f.type === 'cidade').map((filter) => (
+                                <div
+                                  key={filter.value}
+                                  className="group inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-primary/5 to-primary/10 hover:to-primary/15 text-primary-600 rounded-full text-sm font-medium shadow-sm transition-all duration-200 ease-in-out"
+                                >
+                                  <Users className="w-3.5 h-3.5 flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
+                                  {filter.label}
+                                  <button
+                                    onClick={() => handleRemoveFilter(filter)}
+                                    className="ml-0.5 p-1 -mr-1 hover:bg-primary/10 rounded-full transition-colors duration-200"
+                                    aria-label="Remover filtro"
+                                  >
+                                    <X className="w-3 h-3 opacity-70 hover:opacity-100 transition-opacity" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Dropdown sempre visível na parte inferior */}
+                          <div className="p-2.5 border-t bg-gray-50/80 backdrop-blur-sm">
+                            <select
+                              className="w-full outline-none bg-transparent text-sm text-gray-600 cursor-pointer hover:text-gray-900 transition-colors"
+                              value=""
+                              onChange={(e) => {
+                                const option = filterOptions.cidade.find(o => o.value === e.target.value);
+                                if (option) handleAddFilter(option);
+                              }}
+                            >
+                              <option value="" className="text-gray-500">Selecione uma cidade...</option>
+                              {filterOptions.cidade.map((option) => (
+                                <option key={option.value} value={option.value} className="text-gray-900">
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <Link className="w-4 h-4" />
+                        Bairro
+                      </label>
+                      <div className="relative">
+                        <div className="w-full border rounded-xl focus-within:ring-2 focus-within:ring-primary/50 bg-white shadow-sm">
+                          {/* Container para as tags com scroll */}
+                          <div className="max-h-[120px] overflow-y-auto scrollbar-thin">
+                            <div className="flex flex-wrap gap-2 p-3">
+                              {selectedFilters.filter(f => f.type === 'bairro').map((filter) => (
+                                <div
+                                  key={filter.id}
+                                  className="group inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-primary/5 to-primary/10 hover:to-primary/15 text-primary-600 rounded-full text-sm font-medium shadow-sm transition-all duration-200 ease-in-out"
+                                >
+                                  <Link className="w-3.5 h-3.5 flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
+                                  {filter.label}
+                                  <button
+                                    onClick={() => handleRemoveFilter(filter)}
+                                    className="ml-0.5 p-1 -mr-1 hover:bg-primary/10 rounded-full transition-colors duration-200"
+                                    aria-label="Remover filtro"
+                                  >
+                                    <X className="w-3 h-3 opacity-70 hover:opacity-100 transition-opacity" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Dropdown sempre visível na parte inferior */}
+                          <div className="p-2.5 border-t bg-gray-50/80 backdrop-blur-sm">
+                            <select
+                              className="w-full outline-none bg-transparent text-sm text-gray-600 cursor-pointer hover:text-gray-900 transition-colors"
+                              value=""
+                              onChange={(e) => {
+                                const option = filterOptions.bairro.find(o => o.value === e.target.value);
+                                if (option) handleAddFilter(option);
+                              }}
+                            >
+                              <option value="" className="text-gray-500">Selecione um bairro...</option>
+                              {filterOptions.bairro.map((option) => (
+                                <option key={option.id} value={option.value} className="text-gray-900">
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <FileText className="w-4 h-4" />
+                        Categoria
+                      </label>
+                      <div className="relative">
+                        <div className="w-full border rounded-xl focus-within:ring-2 focus-within:ring-primary/50 bg-white shadow-sm">
+                          {/* Container para as tags com scroll */}
+                          <div className="max-h-[120px] overflow-y-auto scrollbar-thin">
+                            <div className="flex flex-wrap gap-2 p-3">
+                              {selectedFilters.filter(f => f.type === 'categoria').map((filter) => (
+                                <div
+                                  key={filter.id}
+                                  className="group inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-primary/5 to-primary/10 hover:to-primary/15 text-primary-600 rounded-full text-sm font-medium shadow-sm transition-all duration-200 ease-in-out"
+                                >
+                                  <FileText className="w-3.5 h-3.5 flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
+                                  {filter.label}
+                                  <button
+                                    onClick={() => handleRemoveFilter(filter)}
+                                    className="ml-0.5 p-1 -mr-1 hover:bg-primary/10 rounded-full transition-colors duration-200"
+                                    aria-label="Remover filtro"
+                                  >
+                                    <X className="w-3 h-3 opacity-70 hover:opacity-100 transition-opacity" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Dropdown sempre visível na parte inferior */}
+                          <div className="p-2.5 border-t bg-gray-50/80 backdrop-blur-sm">
+                            <select
+                              className="w-full outline-none bg-transparent text-sm text-gray-600 cursor-pointer hover:text-gray-900 transition-colors"
+                              value=""
+                              onChange={(e) => {
+                                const option = filterOptions.categoria.find(o => o.value === e.target.value);
+                                if (option) handleAddFilter(option);
+                              }}
+                            >
+                              <option value="" className="text-gray-500">Selecione uma categoria...</option>
+                              {filterOptions.categoria.map((option) => (
+                                <option key={option.id} value={option.value} className="text-gray-900">
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <Users className="w-4 h-4" />
+                        Gênero
+                      </label>
+                      <div className="relative">
+                        <div className="w-full border rounded-xl focus-within:ring-2 focus-within:ring-primary/50 bg-white shadow-sm">
+                          {/* Container para as tags com scroll */}
+                          <div className="max-h-[120px] overflow-y-auto scrollbar-thin">
+                            <div className="flex flex-wrap gap-2 p-3">
+                              {selectedFilters.filter(f => f.type === 'genero').map((filter) => (
+                                <div
+                                  key={filter.id}
+                                  className="group inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-primary/5 to-primary/10 hover:-to-primary/15 text-primary-600 rounded-full text-sm font-medium shadow-sm transition-all duration-200 ease-in-out"
+                                >
+                                  <Users className="w-3.5 h-3.5 flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
+                                  {filter.label}
+                                  <button
+                                    onClick={() => handleRemoveFilter(filter)}
+                                    className="ml-0.5 p-1 -mr-1 hover:bg-primary/10 rounded-full transition-colors duration-200"
+                                    aria-label="Remover filtro"
+                                  >
+                                    <X className="w-3 h-3 opacity-70 hover:opacity-100 transition-opacity" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Dropdown sempre visível na parte inferior */}
+                          <div className="p-2.5 border-t bg-gray-50/80 backdrop-blur-sm">
+                            <select
+                              className="w-full outline-none bg-transparent text-sm text-gray-600 cursor-pointer hover:text-gray-900 transition-colors"
+                              value=""
+                              onChange={(e) => {
+                                const option = filterOptions.genero.find(o => o.value === e.target.value);
+                                if (option) handleAddFilter(option);
+                              }}
+                            >
+                              <option value="" className="text-gray-500">Selecione um gênero...</option>
+                              {filterOptions.genero.map((option) => (
+                                <option key={option.id} value={option.value} className="text-gray-900">
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -740,72 +2756,11 @@ export function DisparoMidia() {
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-gray-700">Mensagem:</span>
-                          {selectedGreeting && (
-                            <div className="flex items-center gap-1.5 bg-primary-50 text-primary-700 px-2 py-1 rounded-md text-sm">
-                              <span>{selectedGreeting}</span>
-                              <button
-                                onClick={() => {
-                                  setSelectedGreeting('');
-                                  setMessage(message.replace(selectedGreeting + '\n\n', ''));
-                                }}
-                                className="hover:text-primary-800"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          )}
-                          {!selectedGreeting && (
-                            <button
-                              type="button"
-                              onClick={() => setShowGreetings(!showGreetings)}
-                              className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                              Adicionar saudação
-                            </button>
-                          )}
-
-                          {showGreetings && !selectedGreeting && (
-                            <div className="absolute mt-8 w-64 bg-white rounded-lg shadow-lg border z-10">
-                              <div className="p-2 border-b">
-                                <label className="flex items-center gap-2 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    checked={includeUserName}
-                                    onChange={(e) => setIncludeUserName(e.target.checked)}
-                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                  />
-                                  Incluir nome do eleitor
-                                </label>
-                              </div>
-                              <div className="max-h-48 overflow-y-auto">
-                                {greetings.map((greeting) => (
-                                  <button
-                                    key={greeting.id}
-                                    onClick={() => {
-                                      const greetingText = greeting.text.includes('{nome_eleitor}')
-                                        ? greeting.text
-                                        : includeUserName 
-                                          ? `${greeting.text} {nome_eleitor}` 
-                                          : greeting.text;
-                                      setSelectedGreeting(greetingText);
-                                      setMessage(prev => 
-                                        greetingText + (prev ? `\n\n${prev}` : '')
-                                      );
-                                      setShowGreetings(false);
-                                    }}
-                                    className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                  >
-                                    {greeting.text.includes('{nome_eleitor}')
-                                      ? greeting.text
-                                      : includeUserName 
-                                        ? `${greeting.text} {nome_eleitor}` 
-                                        : greeting.text}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                          <MessageTag
+                            tag={selectedGreeting}
+                            onRemove={handleRemoveTag}
+                            onEdit={handleEditTag}
+                          />
                         </div>
                       </div>
 
@@ -1090,7 +3045,7 @@ export function DisparoMidia() {
                 <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
                   <button
                     onClick={() => setShowConfirm(false)}
-                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:hover:bg-gray-600"
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:hover:bg-gray-600"
                   >
                     Cancelar
                   </button>
@@ -1103,6 +3058,30 @@ export function DisparoMidia() {
                 </div>
               </div>
             </Dialog>
+            
+            {/* Barra de Progresso */}
+            {loading && (
+              <div className="fixed top-0 left-0 right-0 z-50">
+                <div className="bg-gray-200 h-2">
+                  <div 
+                    className="bg-blue-600 h-2 transition-all duration-300"
+                    style={{ 
+                      width: `${Math.max(uploadProgress, totalProgress)}%`
+                    }}
+                  />
+                </div>
+                {uploadProgress > 0 && (
+                  <div className="text-center text-sm text-gray-600">
+                    Enviando arquivo: {Math.round(uploadProgress)}%
+                  </div>
+                )}
+                {totalProgress > 0 && (
+                  <div className="text-center text-sm text-gray-600">
+                    Progresso total: {Math.round(totalProgress)}%
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

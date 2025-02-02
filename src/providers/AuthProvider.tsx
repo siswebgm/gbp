@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { authService, AuthData } from '../services/auth';
 import { useCompanyStore } from '../store/useCompanyStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { supabaseClient } from '../lib/supabase';
 
 interface Company {
   uid: string;
@@ -30,6 +31,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setCompany = useCompanyStore((state) => state.setCompany);
   const setCompanyUser = useCompanyStore((state) => state.setUser);
   const authStore = useAuthStore();
+
+  useEffect(() => {
+    // Monitorar mudanças na sessão do Supabase
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session);
+      
+      if (event === 'SIGNED_OUT') {
+        authStore.logout();
+        navigate('/login');
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        loadStoredUser();
+      }
+    });
+
+    // Tentar renovar a sessão ao iniciar
+    const refreshSession = async () => {
+      const { data: { session }, error } = await supabaseClient.auth.getSession();
+      if (error) {
+        console.error('Erro ao obter sessão:', error);
+        return;
+      }
+
+      if (session) {
+        const { data: { session: refreshedSession }, error: refreshError } = 
+          await supabaseClient.auth.refreshSession();
+        
+        if (refreshError) {
+          console.error('Erro ao renovar sessão:', refreshError);
+          return;
+        }
+
+        console.log('Sessão renovada:', refreshedSession);
+      }
+    };
+
+    refreshSession();
+    loadStoredUser();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
 
   const loadStoredUser = () => {
     try {
@@ -98,10 +141,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCompanyUser(null);
     }
   };
-
-  useEffect(() => {
-    loadStoredUser();
-  }, []);
 
   const signIn = async (email: string, password: string) => {
     try {

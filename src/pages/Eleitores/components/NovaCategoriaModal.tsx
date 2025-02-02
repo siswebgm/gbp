@@ -17,7 +17,8 @@ interface NovaCategoriaModalProps {
 export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps) {
   const { user } = useAuth();
   const company = useCompanyStore((state) => state.company);
-  const [nome, setNome] = useState('');
+  const [nomes, setNomes] = useState<string[]>([]);
+  const [novoNome, setNovoNome] = useState('');
   const [descricao, setDescricao] = useState('');
   const [tipo, setTipo] = useState('');
   const [novoTipo, setNovoTipo] = useState('');
@@ -27,6 +28,41 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: tipos, isLoading: isLoadingTipos } = useCategoryTypes();
+
+  const handleAddNome = () => {
+    if (!novoNome.trim()) return;
+    
+    const nomeFormatado = novoNome
+      .trim()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+    
+    if (!nomes.includes(nomeFormatado)) {
+      setNomes([...nomes, nomeFormatado]);
+      setNovoNome('');
+    }
+  };
+
+  const handleRemoveNome = (index: number) => {
+    setNomes(nomes.filter((_, i) => i !== index));
+  };
+
+  const handleNovoNomeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const formattedValue = value
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+    setNovoNome(formattedValue);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddNome();
+    }
+  };
 
   const handleAddNovoTipo = async () => {
     if (!novoTipo.trim()) {
@@ -76,6 +112,17 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    
+    if (nomes.length === 0) {
+      toast({
+        title: "⚠️ Campo obrigatório",
+        description: "Adicione pelo menos um nome de categoria",
+        className: "bg-yellow-50 border-yellow-200 text-yellow-800",
+        duration: 3000,
+      });
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -91,60 +138,41 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
         tipoUid = createdTipo.uid;
       }
 
-      // Formata o nome da categoria com primeira letra maiúscula
-      const nomeFormatado = nome
-        .trim()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-
-      // Cria a categoria
-      await categoryService.create({
-        nome: nomeFormatado,
-        descricao: descricao.trim(),
-        tipo_uid: tipoUid,
-        empresa_uid: company?.uid || ''
-      });
+      // Cria todas as categorias com o mesmo tipo
+      await Promise.all(
+        nomes.map(nome => 
+          categoryService.create({
+            nome: nome,
+            tipo_uid: tipoUid,
+            empresa_uid: company?.uid || ''
+          })
+        )
+      );
 
       toast({
         title: "✨ Sucesso!",
-        description: "Categoria criada com sucesso!",
+        description: `${nomes.length} ${nomes.length === 1 ? 'categoria criada' : 'categorias criadas'} com sucesso!`,
         className: "bg-green-50 border-green-200 text-green-800",
         duration: 3000,
       });
 
-      setNome('');
+      setNomes([]);
+      setNovoNome('');
       setDescricao('');
       setTipo('');
       onClose();
     } catch (error) {
-      console.error('Erro ao criar categoria:', error);
-      setError(error instanceof Error ? error.message : 'Erro ao criar categoria');
+      console.error('Erro ao criar categorias:', error);
+      setError(error instanceof Error ? error.message : 'Erro ao criar categorias');
       toast({
         title: "❌ Erro",
-        description: error instanceof Error ? error.message : "Erro ao criar categoria",
+        description: error instanceof Error ? error.message : "Erro ao criar categorias",
         className: "bg-red-50 border-red-200 text-red-800",
         duration: 3000,
       });
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleNomeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Formata com iniciais maiúsculas em tempo real
-    const formattedValue = value
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
-    setNome(formattedValue);
-  };
-
-  const handleNovoTipoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Formata em maiúsculas em tempo real
-    setNovoTipo(value.toUpperCase());
   };
 
   if (!isOpen) return null;
@@ -161,16 +189,51 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
-                  Nome <span className="text-red-500">*</span>
+                  Nomes <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={nome}
-                  onChange={handleNomeChange}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:border-blue-500 dark:focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
-                  placeholder="Digite o nome da categoria"
-                  disabled={isLoading}
-                />
+                <div className="space-y-2">
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={novoNome}
+                      onChange={handleNovoNomeChange}
+                      onKeyPress={handleKeyPress}
+                      className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:border-blue-500 dark:focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
+                      placeholder="Ex: CPF, CNH, Título de Eleitor"
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddNome}
+                      className="p-2.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center justify-center border border-gray-300 dark:border-gray-600"
+                      disabled={isLoading || !novoNome.trim()}
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    Digite o nome do documento e pressione Enter ou clique no + para adicionar
+                  </p>
+                  {nomes.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {nomes.map((nome, index) => (
+                        <div
+                          key={index}
+                          className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-sm"
+                        >
+                          <span>{nome}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveNome(index)}
+                            className="hover:text-blue-900"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -186,7 +249,7 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
                         className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:border-blue-500 dark:focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
                         disabled={isLoading || isLoadingTipos}
                       >
-                        <option value="">Selecione um tipo...</option>
+                        <option value="">Selecione o tipo (ex: Documentos)</option>
                         {tipos?.map((t) => (
                           <option key={t.uid} value={t.uid}>
                             {t.nome}
@@ -207,7 +270,7 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
                       <input
                         type="text"
                         value={novoTipo}
-                        onChange={handleNovoTipoChange}
+                        onChange={(e) => setNovoTipo(e.target.value.toUpperCase())}
                         className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:border-blue-500 dark:focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
                         placeholder="Digite o nome do novo tipo"
                         disabled={isLoading}
@@ -233,20 +296,6 @@ export function NovaCategoriaModal({ isOpen, onClose }: NovaCategoriaModalProps)
                     </div>
                   )}
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
-                  Descrição
-                </label>
-                <textarea
-                  value={descricao}
-                  onChange={(e) => setDescricao(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 text-gray-900 dark:text-gray-100 focus:border-blue-500 dark:focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
-                  placeholder="Digite uma descrição (opcional)"
-                  rows={3}
-                  disabled={isLoading}
-                />
               </div>
             </div>
 

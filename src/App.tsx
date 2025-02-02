@@ -5,6 +5,7 @@ import { CompanyProvider } from './providers/CompanyProvider';
 import { ErrorBoundary } from 'react-error-boundary';
 import AppRoutes from './routes';
 import { Toaster } from "./components/ui/toaster";
+import './styles/scrollbar.css';
 
 // Configuração do React Query
 const queryClient = new QueryClient({
