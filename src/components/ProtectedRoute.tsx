@@ -1,35 +1,29 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuthGuard } from '../hooks/useAuthGuard';
-import { Loader } from 'lucide-react';
-import { useCompanyStore } from '../store/useCompanyStore';
-import { supabaseClient } from '../lib/supabase';
 
 export function ProtectedRoute() {
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
-  const company = useCompanyStore((state) => state.company);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  // Use o hook de proteção
-  useAuthGuard();
-
-  React.useEffect(() => {
-    const checkSession = async () => {
+  useEffect(() => {
+    const checkAuth = () => {
       try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        setIsAuthenticated(!!session && !!company?.id);
+        const sessionStr = localStorage.getItem('supabase.auth.token');
+        if (sessionStr) {
+          const session = JSON.parse(sessionStr);
+          setIsAuthenticated(new Date(session.expires_at) > new Date());
+        } else {
+          setIsAuthenticated(false);
+        }
       } catch (error) {
-        console.error('Session check error:', error);
+        console.error('Erro ao verificar autenticação:', error);
         setIsAuthenticated(false);
-      } finally {
-        setIsLoading(false);
       }
     };
 
-    checkSession();
-  }, [company?.id]);
+    checkAuth();
+  }, []);
 
-  if (isLoading) {
+  if (isAuthenticated === null) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader className="w-8 h-8 animate-spin text-primary-500" />

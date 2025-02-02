@@ -1,60 +1,47 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabaseClient as supabase } from '../lib/supabase';
-import { useCompanyStore } from '../store/useCompanyStore';
+import { useState, useEffect } from 'react';
+import { User } from '../types/user';
 
 export function useAuth() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const navigate = useNavigate();
-  const clearCompany = useCompanyStore((state) => state.clearCompany);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Verificar sessão inicial
-    const checkSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        setIsAuthenticated(!!session);
-      } catch (error) {
-        console.error('Erro ao verificar sessão:', error);
-        setIsAuthenticated(false);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    checkAuth();
+  }, []);
 
-    checkSession();
-
-    // Observar mudanças na sessão
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, !!session);
-      setIsAuthenticated(!!session);
-
-      if (!session) {
-        clearCompany();
-        navigate('/login');
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [clearCompany, navigate]);
-
-  const signOut = async () => {
+  const checkAuth = async () => {
     try {
-      await supabase.auth.signOut();
-      clearCompany();
-      navigate('/login');
+      const sessionStr = localStorage.getItem('supabase.auth.token');
+      if (sessionStr) {
+        const session = JSON.parse(sessionStr);
+        if (new Date(session.expires_at) > new Date()) {
+          const userStr = localStorage.getItem('gbp_user');
+          if (userStr) {
+            setUser(JSON.parse(userStr));
+          }
+        } else {
+          // Sessão expirada
+          await signOut();
+        }
+      }
     } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+      console.error('Erro ao verificar autenticação:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  const signOut = async () => {
+    localStorage.removeItem('supabase.auth.token');
+    localStorage.removeItem('gbp_user');
+    localStorage.removeItem('empresa_uid');
+    localStorage.removeItem('user_uid');
+    setUser(null);
+  };
+
   return {
-    isAuthenticated,
-    isLoading,
+    user,
+    loading,
     signOut
   };
 }

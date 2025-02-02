@@ -27,18 +27,7 @@ export const authService = {
     try {
       console.log('Login attempt with:', { email });
 
-      // Fazer login no Supabase
-      const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (authError) {
-        console.error('Erro de autenticação:', authError);
-        throw new AuthError('Email ou senha inválidos');
-      }
-
-      // Busca o usuário na tabela gbp_usuarios
+      // Busca o usuário na tabela gbp_usuarios pelo email e senha
       const { data: user, error } = await supabaseClient
         .from('gbp_usuarios')
         .select(`
@@ -53,27 +42,45 @@ export const authService = {
           status,
           ultimo_acesso,
           created_at,
-          foto
+          foto,
+          senha
         `)
         .eq('email', email.toString())
+        .eq('senha', password) // Adiciona verificação da senha
         .single();
 
       console.log('User data:', user);
 
       if (error || !user) {
         console.error('Erro ao buscar usuário:', error);
-        throw new AuthError('Usuário não encontrado');
+        throw new AuthError('Email ou senha inválidos');
       }
 
+      // Verifica se o usuário está ativo
+      if (user.status !== 'active') {
+        throw new AuthError('Usuário inativo ou bloqueado');
+      }
+
+      // Remove o campo senha antes de retornar/salvar os dados
+      const { senha, ...userData } = user;
+
       // Atualiza último acesso
-      await this.updateLastAccess(user.uid);
+      await this.updateLastAccess(userData.uid);
 
       // Salva dados no localStorage
-      localStorage.setItem('gbp_user', JSON.stringify(user));
-      localStorage.setItem('empresa_uid', user.empresa_uid || '');
-      localStorage.setItem('user_uid', user.uid);
+      localStorage.setItem('gbp_user', JSON.stringify(userData));
+      localStorage.setItem('empresa_uid', userData.empresa_uid || '');
+      localStorage.setItem('user_uid', userData.uid);
 
-      return user;
+      // Cria uma sessão personalizada
+      const session = {
+        user: userData,
+        access_token: btoa(JSON.stringify({ uid: userData.uid, email: userData.email })), // Token simples para manter compatibilidade
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // Expira em 24 horas
+      };
+      localStorage.setItem('supabase.auth.token', JSON.stringify(session));
+
+      return userData;
     } catch (error) {
       console.error('Login error:', error);
       if (error instanceof AuthError) {

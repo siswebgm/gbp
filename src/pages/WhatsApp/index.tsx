@@ -1,9 +1,127 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { Box, Typography } from '@mui/material';
+import { useCompanyStore } from '../../store/useCompanyStore';
+import { supabaseClient } from '../../lib/supabase';
+import toast from 'react-hot-toast';
+import { Wifi, WifiOff, Loader2 } from 'lucide-react';
+import axios from 'axios';
 
 export default function WhatsAppPage() {
+  const { company } = useCompanyStore();
+  const [whatsappStatus, setWhatsappStatus] = useState<'open' | 'closed' | 'sincronizando'>('closed');
+  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
+
+  console.log('WhatsAppPage - Company:', company);
+
+  // Verificar status do WhatsApp na tabela gbp_empresas
+  useEffect(() => {
+    const checkWhatsAppStatus = async () => {
+      if (!company?.uid) {
+        console.log('Sem company.uid no localStorage');
+        return;
+      }
+
+      console.log('Verificando status do WhatsApp para empresa:', company.uid);
+      setIsLoadingStatus(true);
+      
+      try {
+        const { data, error } = await supabaseClient
+          .from('gbp_empresas')
+          .select('status_wpp, qr_code')
+          .eq('uid', company.uid)
+          .single();
+
+        if (error) {
+          console.error('Erro na consulta:', error);
+          throw error;
+        }
+        
+        console.log('Dados recebidos da empresa:', data);
+        const newStatus = data?.status_wpp === 'open' || data?.status_wpp === 'sincronizando' 
+          ? data.status_wpp 
+          : 'closed';
+        console.log('Status anterior:', whatsappStatus, 'Novo status:', newStatus);
+        
+        if (whatsappStatus !== newStatus) {
+          console.log('Atualizando status de', whatsappStatus, 'para', newStatus);
+          setWhatsappStatus(newStatus as any);
+        }
+
+        if (data?.qr_code !== qrCodeBase64) {
+          console.log('Atualizando QR code');
+          setQrCodeBase64(data?.qr_code);
+        }
+      } catch (error) {
+        console.error('Erro ao verificar status do WhatsApp:', error);
+        toast.error('Erro ao verificar status do WhatsApp');
+      } finally {
+        setIsLoadingStatus(false);
+      }
+    };
+
+    // Consulta inicial
+    checkWhatsAppStatus();
+
+    if (!company?.uid) return;
+
+    // Configurar realtime subscription
+    const subscription = supabaseClient
+      .channel(`whatsapp-status-${company.uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'gbp_empresas',
+          filter: `uid=eq.${company.uid}`
+        },
+        (payload) => {
+          console.log('Mudança detectada:', {
+            event: payload.eventType,
+            old: payload.old,
+            new: payload.new
+          });
+          
+          if (payload.new?.status_wpp !== undefined) {
+            const newStatus = payload.new.status_wpp === 'open' || payload.new.status_wpp === 'sincronizando' 
+              ? payload.new.status_wpp 
+              : 'closed';
+            console.log('Status anterior:', whatsappStatus, 'Novo status:', newStatus);
+            
+            if (whatsappStatus !== newStatus) {
+              console.log('Atualizando status via subscription de', whatsappStatus, 'para', newStatus);
+              setWhatsappStatus(newStatus as any);
+            }
+          }
+          
+          if (payload.new?.qr_code !== qrCodeBase64) {
+            console.log('Novo QR code recebido via subscription');
+            setQrCodeBase64(payload.new.qr_code);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`Subscription status:`, status);
+      });
+
+    return () => {
+      console.log('Limpando subscription');
+      subscription.unsubscribe();
+    };
+  }, [company?.uid]);
+
+  // Debug: Mostrar estado atual
+  useEffect(() => {
+    console.log('Estado atual do WhatsApp:', {
+      status: whatsappStatus,
+      hasQRCode: !!qrCodeBase64,
+      companyUid: company?.uid
+    });
+  }, [whatsappStatus, qrCodeBase64, company?.uid]);
 
   const handleGenerateQRCode = async () => {
     setIsGenerating(true);
@@ -12,6 +130,23 @@ export default function WhatsAppPage() {
       setQrCode("https://example.com/whatsapp-connection");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSincronizar = async () => {
+    if (!company?.uid) {
+      toast.error('Empresa não encontrada');
+      return;
+    }
+
+    try {
+      await axios.post('https://whkn8n.guardia.work/webhook/gbp_sincronizar', {
+        acao: 'sincronizar',
+        empresaUid: company.uid
+      });
+    } catch (error) {
+      console.error('Erro ao sincronizar:', error);
+      toast.error('Erro ao sincronizar com WhatsApp');
     }
   };
 
@@ -37,7 +172,7 @@ export default function WhatsAppPage() {
         <div className="flex justify-center px-4 -mt-16">
           <div className="bg-white rounded shadow-lg w-full max-w-[1000px] p-12">
             <h1 className="text-[#41525d] text-[1.35rem] font-light mb-12">
-              Use o WhatsApp no seu computador
+              USE O WHATSAPP NO SEU COMPUTADOR
             </h1>
 
             <div className="flex flex-col md:flex-row justify-between gap-20">
@@ -70,40 +205,47 @@ export default function WhatsAppPage() {
                       <p className="text-[#41525d]">Gerando QR Code...</p>
                     </div>
                   </div>
-                ) : qrCode ? (
-                  <div className="relative">
-                    <QRCodeSVG
-                      value={qrCode}
-                      size={264}
-                      level="H"
-                      includeMargin={true}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <img
-                        src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/WhatsApp.svg/512px-WhatsApp.svg.png"
-                        alt=""
-                        className="w-12 h-12 opacity-20"
-                      />
+                ) : whatsappStatus === 'open' ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="bg-[#00a884]/10 p-6 rounded-lg">
+                      <Wifi className="w-16 h-16 text-[#00a884]" />
                     </div>
+                    <p className="text-[#00a884] font-medium">WhatsApp Conectado</p>
+                    <p className="text-sm text-gray-500">
+                      Seu WhatsApp está conectado e pronto para uso
+                    </p>
                   </div>
+                ) : whatsappStatus === 'sincronizando' ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="bg-blue-100 p-6 rounded-lg">
+                      <Loader2 className="w-16 h-16 text-blue-500 animate-spin" />
+                    </div>
+                    <p className="text-blue-500 font-medium">Sincronizando WhatsApp</p>
+                    <p className="text-sm text-gray-500">
+                      Aguarde enquanto conectamos seu WhatsApp
+                    </p>
+                  </div>
+                ) : qrCodeBase64 ? (
+                  <img src={qrCodeBase64} alt="QR Code" className="mx-auto" />
                 ) : (
-                  <button 
-                    onClick={handleGenerateQRCode}
-                    className="w-[264px] h-[264px] border-2 border-[#00a884] rounded flex flex-col items-center justify-center gap-4 cursor-pointer hover:bg-[#f0f2f5] transition-colors group"
+                  <div 
+                    className="flex flex-col items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={handleSincronizar}
                   >
-                    {/* Ícone de QR Code */}
-                    <div className="w-16 h-16 border-2 border-[#00a884] rounded flex items-center justify-center group-hover:bg-white transition-colors">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="#00a884" strokeWidth="2">
-                        <path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3z"/>
-                        <path d="M15 15h2v2h-2zM19 15h2v2h-2zM15 19h2v2h-2zM19 19h2v2h-2z"/>
-                      </svg>
+                    <div className="bg-red-100 p-6 rounded-lg">
+                      <WifiOff className="w-16 h-16 text-red-500" />
                     </div>
-                    <div className="text-center px-4">
-                      <p className="text-[#41525d] font-medium mb-1">Clique aqui para gerar o QR Code</p>
-                      <p className="text-sm text-[#667781]">Necessário para conectar ao WhatsApp</p>
-                    </div>
-                  </button>
+                    <p className="text-red-500 font-medium">WhatsApp Desconectado</p>
+                    <p className="text-sm text-gray-500">
+                      Clique para gerar o QR Code
+                    </p>
+                  </div>
                 )}
+                <p className="mt-4 text-sm text-gray-500">
+                  {whatsappStatus === 'open' 
+                    ? 'Você pode usar o WhatsApp normalmente'
+                    : 'Necessário para conectar ao WhatsApp'}
+                </p>
               </div>
             </div>
           </div>

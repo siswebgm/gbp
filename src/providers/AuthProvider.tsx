@@ -4,7 +4,6 @@ import { toast } from 'react-toastify';
 import { authService, AuthData } from '../services/auth';
 import { useCompanyStore } from '../store/useCompanyStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { supabaseClient } from '../lib/supabase';
 
 interface Company {
   uid: string;
@@ -33,44 +32,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const authStore = useAuthStore();
 
   useEffect(() => {
-    // Monitorar mudanças na sessão do Supabase
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session);
-      
-      if (event === 'SIGNED_OUT') {
-        authStore.logout();
-        navigate('/login');
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        loadStoredUser();
-      }
-    });
-
-    // Tentar renovar a sessão ao iniciar
-    const refreshSession = async () => {
-      const { data: { session }, error } = await supabaseClient.auth.getSession();
-      if (error) {
-        console.error('Erro ao obter sessão:', error);
-        return;
-      }
-
-      if (session) {
-        const { data: { session: refreshedSession }, error: refreshError } = 
-          await supabaseClient.auth.refreshSession();
-        
-        if (refreshError) {
-          console.error('Erro ao renovar sessão:', refreshError);
-          return;
-        }
-
-        console.log('Sessão renovada:', refreshedSession);
-      }
-    };
-
-    refreshSession();
+    // Carregar usuário do localStorage ao iniciar
     loadStoredUser();
 
+    // Verificar periodicamente se a sessão expirou
+    const checkSessionInterval = setInterval(() => {
+      const sessionStr = localStorage.getItem('supabase.auth.token');
+      if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          if (new Date(session.expires_at) < new Date()) {
+            // Sessão expirou
+            console.log('Sessão expirada, fazendo logout...');
+            authStore.logout();
+            navigate('/login');
+          }
+        } catch (error) {
+          console.error('Erro ao verificar sessão:', error);
+        }
+      }
+    }, 60000); // Verifica a cada minuto
+
     return () => {
-      subscription?.unsubscribe();
+      clearInterval(checkSessionInterval);
     };
   }, []);
 

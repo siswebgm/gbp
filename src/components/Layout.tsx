@@ -131,6 +131,27 @@ export function Layout() {
     fetchCompanyPlan();
   }, [user?.uid, user?.empresa_uid]);
 
+  const handleLogout = async () => {
+    try {
+      // Remove todos os dados de autenticação
+      localStorage.removeItem('supabase.auth.token');
+      localStorage.removeItem('gbp_user');
+      localStorage.removeItem('empresa_uid');
+      localStorage.removeItem('user_uid');
+      
+      // Limpa os estados
+      authStore.logout();
+      setCompany(null);
+      setCompanyUser(null);
+
+      // Redireciona para login
+      navigate('/login');
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+      toast.error('Erro ao fazer logout');
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-100 dark:bg-gray-900 md:overflow-hidden">
       {/* Header */}

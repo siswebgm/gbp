@@ -1,7 +1,5 @@
 import React from 'react';
 import { Container, Grid, Typography, Box } from '@mui/material';
-import { WhatsAppSettings } from './components/WhatsAppSettings';
-import { WhatsAppConnections } from './components/WhatsAppConnections';
 import { BirthdaySettings } from './components/BirthdaySettings';
 import { CategorySettings } from './components/CategorySettings';
 
@@ -16,14 +14,6 @@ export const Settings: React.FC = () => {
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <CategorySettings />
-          </Grid>
-
-          <Grid item xs={12}>
-            <WhatsAppSettings />
-          </Grid>
-          
-          <Grid item xs={12}>
-            <WhatsAppConnections />
           </Grid>
 
           <Grid item xs={12}>
