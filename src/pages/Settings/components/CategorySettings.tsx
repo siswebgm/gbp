@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Edit2, Trash2, Plus, X, Check, Loader2, Search } from 'lucide-react';
-import { useCategorias } from '../../../hooks/useCategorias';
+import { useCategories } from '../../../hooks/useCategories';
 import { useCategoriaTipos } from '../../../hooks/useCategoriaTipos';
 import { toast } from 'react-toastify';
 
@@ -10,7 +10,7 @@ interface CategoriaFormData {
 }
 
 export function CategorySettings() {
-  const { categorias, isLoading, create, update, delete: deleteCategoria } = useCategorias();
+  const { data: categorias, isLoading, createCategory: create, updateCategory: update, deleteCategory: deleteCategoria } = useCategories();
   const { tipos, isLoading: isLoadingTipos } = useCategoriaTipos();
   
   const [editingId, setEditingId] = useState<string | null>(null);

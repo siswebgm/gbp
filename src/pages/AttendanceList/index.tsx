@@ -3,7 +3,7 @@ import { Plus, Filter, Download, Clock, CheckCircle, XCircle, Calendar, ChevronD
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AttendanceTable } from './components/AttendanceTable';
 import { useAtendimentos, AtendimentoStatus } from '../../hooks/useAtendimentos';
-import { useCategorias } from '../../hooks/useCategorias';
+import { useCategories } from '../../hooks/useCategories';
 import { useResponsaveis } from '../../hooks/useResponsaveis';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-hot-toast';
@@ -14,7 +14,7 @@ export function AttendanceList() {
   const { state } = location as { state?: { searchTerm?: string; autoSearch?: boolean } };
 
   const { atendimentos, isLoading, error } = useAtendimentos();
-  const { categorias } = useCategorias();
+  const { data: categorias } = useCategories();
   const { responsaveis } = useResponsaveis();
   const [selectedStatus, setSelectedStatus] = useState<AtendimentoStatus | null>(null);
   const [showFilters, setShowFilters] = useState(false);

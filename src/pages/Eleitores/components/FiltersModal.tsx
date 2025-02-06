@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Search, Filter, MapPin, Home, Building2, User2 } from 'lucide-react';
 import { EleitorFilters } from '../../../types/eleitor';
 import { useEleitorOptions } from '../../../hooks/useEleitorOptions';
-import { useCategorias } from '../../../hooks/useCategorias';
+import { useCategories } from '../../../hooks/useCategories';
 
 interface FiltersModalProps {
   isOpen: boolean;
@@ -22,7 +22,7 @@ export function FiltersModal({
     responsaveis: users,
     isLoading 
   } = useEleitorOptions();
-  const { categorias, isLoading: isLoadingCategorias } = useCategorias();
+  const { data: categorias, isLoading: isLoadingCategorias } = useCategories();
 
   const handleFilterChange = (field: keyof EleitorFilters, value: any) => {
     onFilterChange({

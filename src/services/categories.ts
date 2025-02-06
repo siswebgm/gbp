@@ -3,7 +3,6 @@ import { supabaseClient } from '../lib/supabase';
 export interface Category {
   uid: string;
   nome: string;
-  descricao?: string | null;
   tipo_uid: string;
   empresa_uid: string;
   created_at: string;
@@ -48,7 +47,6 @@ export const categoryService = {
       .from('gbp_categorias')
       .insert([{
         nome: category.nome.trim(),
-        descricao: category.descricao?.trim() || null,
         tipo_uid: category.tipo_uid,
         empresa_uid: category.empresa_uid
       }])

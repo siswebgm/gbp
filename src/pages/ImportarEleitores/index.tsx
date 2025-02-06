@@ -9,6 +9,7 @@ import { createUploadHistory, refreshUploadHistory, updateUploadHistory } from '
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import * as ExcelJS from 'exceljs';
+import { useAuth } from '../../providers/AuthProvider';
 
 interface ImportProgress {
   total: number;
@@ -44,6 +45,16 @@ interface CSVRow {
 }
 
 export function ImportarEleitores() {
+  const { user } = useAuth();
+  const canAccess = user?.nivel_acesso !== 'comum';
+
+  useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+  }, [canAccess]);
+
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });

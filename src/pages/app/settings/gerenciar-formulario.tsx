@@ -64,7 +64,6 @@ interface FormConfig {
 interface Category {
   uid: string;
   nome: string;
-  descricao: string;
   empresa_uid: string;
   created_at: string;
   tipo_uid: string;
@@ -262,7 +261,6 @@ export default function GerenciarFormulario() {
         .select(`
           uid, 
           nome, 
-          descricao, 
           empresa_uid, 
           created_at,
           tipo_uid,
@@ -716,7 +714,7 @@ export default function GerenciarFormulario() {
         setIsLoading(true);
         const query = supabaseClient
           .from('gbp_categorias')
-          .select('uid, nome, descricao, empresa_uid, created_at, tipo_uid')
+          .select('uid, nome, empresa_uid, created_at, tipo_uid')
           .eq('empresa_uid', company?.uid);
 
         if (selectedTipo) {

@@ -1,6 +1,6 @@
 import { FormControl, InputLabel, MenuItem, Select, SelectProps } from '@mui/material';
 import { Controller, Control } from 'react-hook-form';
-import { useCategorias } from '../../hooks/useCategorias';
+import { useCategories } from '../../../hooks/useCategories';
 
 interface CategorySelectProps extends Omit<SelectProps, 'value' | 'onChange'> {
   control: Control<any>;
@@ -10,7 +10,7 @@ interface CategorySelectProps extends Omit<SelectProps, 'value' | 'onChange'> {
 }
 
 export function CategorySelect({ control, name, label = 'Categoria', required = false, ...rest }: CategorySelectProps) {
-  const { data: categorias, isLoading, error } = useCategorias();
+  const { data: categorias, isLoading, error } = useCategories();
 
   if (isLoading) {
     return <Select disabled label={label} />;

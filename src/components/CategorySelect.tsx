@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCategoriasEleitor } from '../hooks/useCategoriasEleitor';
+import { useCategories } from '../hooks/useCategories';
 
 interface CategorySelectProps {
   value?: number;
@@ -8,7 +8,7 @@ interface CategorySelectProps {
 }
 
 export function CategorySelect({ value, onChange, error }: CategorySelectProps) {
-  const { data: categories, isLoading } = useCategoriasEleitor();
+  const { data: categories, isLoading } = useCategories();
 
   if (isLoading) {
     return (

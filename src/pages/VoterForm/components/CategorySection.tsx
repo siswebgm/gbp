@@ -1,6 +1,7 @@
 import React from 'react';
 import { UseFormRegister, FormState, UseFormSetValue, UseFormWatch } from 'react-hook-form';
 import { EleitorFormData } from '../../../types/eleitor';
+import { useCategories } from '../../../hooks/useCategories';
 
 interface CategorySectionProps {
   register: UseFormRegister<EleitorFormData>;
@@ -13,6 +14,7 @@ export function CategorySection({ register, formState, setValue, watch }: Catego
   const { errors } = formState;
   const categoria_uid = watch('categoria_uid');
   const indicado = watch('indicado');
+  const { data: categorias, isLoading } = useCategories();
 
   const handleCategoriaChange = (value: string) => {
     setValue('categoria_uid', value);
@@ -36,11 +38,14 @@ export function CategorySection({ register, formState, setValue, watch }: Catego
           <select
             {...register('categoria_uid')}
             className="block w-full pl-3 pr-10 py-2 h-11 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            disabled={isLoading}
           >
             <option value="">Selecione</option>
-            <option value="1">Categoria 1</option>
-            <option value="2">Categoria 2</option>
-            <option value="3">Categoria 3</option>
+            {categorias?.map((categoria) => (
+              <option key={categoria.uid} value={categoria.uid}>
+                {categoria.nome}
+              </option>
+            ))}
           </select>
           {errors.categoria_uid && (
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">

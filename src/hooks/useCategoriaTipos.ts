@@ -5,7 +5,6 @@ import { useCompanyStore } from '../store/useCompanyStore';
 export interface CategoriaTipo {
   uid: string;
   nome: string;
-  descricao?: string;
   empresa_uid: string;
 }
 
@@ -26,7 +25,7 @@ export function useCategoriaTipos() {
 
       const { data, error } = await supabaseClient
         .from('gbp_categoria_tipos')
-        .select('uid, nome, descricao, empresa_uid')
+        .select('uid, nome, empresa_uid')
         .eq('empresa_uid', company.uid)
         .order('nome');
 

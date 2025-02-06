@@ -66,17 +66,9 @@ export interface EleitorFormData {
 }
 
 export interface EleitorFilters {
-  empresa_uid?: string;
-  search?: string;
+  nome?: string;
   zona?: string;
   secao?: string;
-  bairro?: string;
-  categoria_uid?: string;
-  logradouro?: string;
-  indicado?: string;
-  cep?: string;
-  responsavel?: string;
-  cidade?: string;
-  genero?: string;
-  nome?: string;
+  usuario_uid?: string;
+  nivel_acesso?: string;
 }

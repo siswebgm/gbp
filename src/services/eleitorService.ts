@@ -21,7 +21,9 @@ class EleitorService {
     empresa_uid: string, 
     filters: EleitorFilters = {}, 
     page = 1, 
-    pageSize = 10
+    pageSize = 10,
+    usuario_uid?: string | null,
+    nivel_acesso?: string | null
   ): Promise<ListResponse> {
     try {
       let query = supabaseClient
@@ -38,6 +40,11 @@ class EleitorService {
           )
         `)
         .eq('empresa_uid', empresa_uid);
+
+      // Se o nível de acesso for 'comum' e tiver usuario_uid, filtra por ele
+      if (nivel_acesso === 'comum' && usuario_uid) {
+        query = query.eq('usuario_uid', usuario_uid);
+      }
 
       // Aplica os filtros
       if (filters.nome) {

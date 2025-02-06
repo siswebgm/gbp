@@ -5,7 +5,7 @@ import InputMask from 'react-input-mask';
 import { supabaseClient } from '../../lib/supabase';
 import { useAuth } from '../../providers/AuthProvider';
 import { useCompanyStore } from '../../store/useCompanyStore';
-import { useCategoriasEleitor } from '../../hooks/useCategoriasEleitor';
+import { useCategories } from '../../hooks/useCategories';
 import { useIndicados } from '../../hooks/useIndicados';
 import { useCep } from '../../hooks/useCep';
 import { useCPF } from '../../hooks/useCPF';
@@ -92,7 +92,7 @@ export const NovoEleitor: React.FC = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const company = useCompanyStore((state) => state.company);
-  const { data: categorias, isLoading: isLoadingCategorias } = useCategoriasEleitor();
+  const { data: categorias, isLoading: isLoadingCategorias } = useCategories();
   const { data: indicados, isLoading: isLoadingIndicados } = useIndicados();
   const { fetchAddress, isLoading: isLoadingCep } = useCep();
   const { fetchCPFData, isLoading: isLoadingCPF, error: cpfError } = useCPF();

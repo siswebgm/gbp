@@ -1,9 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
+import { useAuth } from '../../../providers/AuthProvider';
 
 export function ProjetosLei() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canAccess = user?.nivel_acesso !== 'comum';
+
+  useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+  }, [canAccess, navigate]);
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
-import { useCategoriasEleitor } from '../../hooks/useCategoriasEleitor';
+import { useCategories } from '../../hooks/useCategories';
 import { CategoryModal } from './CategoryModal';
 
 interface CategorySelectProps {
@@ -11,7 +11,7 @@ interface CategorySelectProps {
 
 export function CategorySelect({ value, onChange, error }: CategorySelectProps) {
   const [showModal, setShowModal] = useState(false);
-  const { data: categorias, isLoading, error: categoriesError } = useCategoriasEleitor();
+  const { data: categorias, isLoading, error: categoriesError } = useCategories();
   const categoriesList = categorias || [];
 
   const handleSuccess = (categoryId: number) => {

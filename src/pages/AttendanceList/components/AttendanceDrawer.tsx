@@ -104,8 +104,7 @@ const priorityConfig = {
 };
 
 export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendimento }: { isOpen: boolean; onClose: () => void; atendimento: Atendimento }) {
-  const { user, getStoredUser } = useAuthStore();
-  const [currentUser, setCurrentUser] = useState(getStoredUser());
+  const { user } = useAuthStore();
   const company = useCompanyStore((state) => state.company);
   const queryClient = useQueryClient();
   const [atendimento, setAtendimento] = useState<Atendimento | null>(null);
@@ -119,6 +118,11 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
   const [itemToDelete, setItemToDelete] = useState<{ type: 'observation' | 'reminder'; id: string } | null>(null);
 
   useEffect(() => {
+    if (!user || !company) {
+      console.warn('Usuário ou empresa não encontrados');
+      return;
+    }
+
     console.log('Estado atual:', {
       user,
       company,
@@ -149,25 +153,19 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
   }, [atendimento?.uid, isOpen]);
 
   useEffect(() => {
-    const storedUser = useAuthStore.getState().getStoredUser();
-    console.log('Usuário armazenado:', storedUser);
-    
-    if (!storedUser) {
+    if (!user) {
       console.log('Usuário não encontrado no storage');
       toast.error('Sessão expirada. Por favor, faça login novamente.');
     }
-  }, [useAuthStore]);
+  }, [user]);
 
   useEffect(() => {
-    const currentUser = useAuthStore.getState().getStoredUser();
-    console.log('AttendanceDrawer - Usuário atual:', currentUser);
-    
-    if (!currentUser?.uid) {
-      console.log('AttendanceDrawer - Usuário não encontrado');
+    if (!user) {
+      console.log('Usuário não encontrado');
       toast.error('Sessão expirada. Por favor, faça login novamente.');
       return;
     }
-  }, [useAuthStore]);
+  }, [user]);
 
   useEffect(() => {
     if (!company?.uid || !atendimento?.uid || !isOpen) {
@@ -225,26 +223,6 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
       observationsSubscription.unsubscribe();
     };
   }, [isOpen, atendimento?.uid]);
-
-  useEffect(() => {
-    const storedUser = getStoredUser();
-    console.log('Debug - Atualizando usuário:', {
-      storedUser,
-      previousUser: currentUser
-    });
-    
-    if (storedUser?.uid) {
-      setCurrentUser(storedUser);
-    } else {
-      console.error('Usuário não encontrado no storage');
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (initialAtendimento && isOpen) {
-      setAtendimento(initialAtendimento);
-    }
-  }, [initialAtendimento, isOpen]);
 
   const fetchData = async () => {
     try {
@@ -401,19 +379,15 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
         return;
       }
 
-      // Obter usuário do store diretamente
-      const currentUser = useAuthStore.getState().user;
-
       if (!atendimento?.uid) {
         console.error('Atendimento não encontrado');
         toast.error('Erro ao salvar observação: Atendimento não encontrado');
         return;
       }
 
-      if (!currentUser?.uid) {
+      if (!user) {
         console.error('Usuário não autenticado:', {
-          currentUser,
-          storeUser: user
+          user
         });
         toast.error('Erro ao salvar observação: Usuário não autenticado');
         return;
@@ -424,7 +398,7 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
         .insert({
           atendimento_uid: atendimento.uid,
           observacao: newObservation.trim(),
-          responsavel: currentUser.uid,
+          responsavel: user.id,
           empresa_uid: atendimento.empresa_uid,
           created_at: new Date().toISOString()
         });
@@ -435,7 +409,7 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
           payload: {
             atendimento_uid: atendimento.uid,
             empresa_uid: atendimento.empresa_uid,
-            responsavel: currentUser.uid,
+            responsavel: user.id,
             observacao: newObservation.trim()
           }
         });
@@ -449,16 +423,6 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
       console.error('Erro ao salvar observação:', error);
       toast.error('Erro ao salvar observação');
     }
-  };
-
-  const verifyUser = () => {
-    const currentUser = useAuthStore.getState().getStoredUser();
-    if (!currentUser?.uid) {
-      console.log('AttendanceDrawer - Usuário não encontrado ao verificar');
-      toast.error('Sessão expirada. Por favor, faça login novamente.');
-      return null;
-    }
-    return currentUser;
   };
 
   const onSubmitReminder = async (data: any) => {
@@ -490,7 +454,7 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
   };
 
   const handleDelete = async () => {
-    if (!itemToDelete) return;
+    if (!itemToDelete || !user) return;
 
     setIsLoading(true);
 

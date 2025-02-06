@@ -1,16 +1,27 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { ArrowLeft, Download } from 'lucide-react';
+import { ArrowLeft, Download, Info, AlertCircle } from 'lucide-react';
 import { useEleitores } from '../../../hooks/useEleitores';
 import { EleitorFilters } from '../../../types/eleitor';
+import { useAuth } from '../../../providers/AuthProvider';
+import { useCompanyStore } from '../../../store/useCompanyStore';
+import { CargoEnum } from '../../../services/auth';
 
 export function ExportarEleitores() {
   const navigate = useNavigate();
   const { register, handleSubmit } = useForm<EleitorFilters>();
   const { exportEleitores } = useEleitores({});
+  const { user } = useAuth();
+  const company = useCompanyStore((state) => state.company);
+  const isAdmin = user?.cargo === CargoEnum.ADMIN;
+  const canAccess = isAdmin && user?.nivel_acesso !== 'comum';
 
   const onSubmit = async (filters: EleitorFilters) => {
+    if (!canAccess) {
+      return;
+    }
+    
     try {
       await exportEleitores(filters);
     } catch (error) {
@@ -20,6 +31,41 @@ export function ExportarEleitores() {
 
   return (
     <div className="p-6">
+      {/* Banner de Permissões */}
+      <div className="mb-6 bg-blue-50 border-l-4 border-blue-400 p-4 dark:bg-blue-900/20 dark:border-blue-800">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            {canAccess ? (
+              <Info className="h-5 w-5 text-blue-400" aria-hidden="true" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-red-400" aria-hidden="true" />
+            )}
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200">
+              Informações de Acesso
+            </h3>
+            <div className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+              <p className="mb-1">
+                <strong>Permissões necessárias:</strong>
+              </p>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Cargo: Administrador {isAdmin ? '✓' : '✗'}</li>
+                <li>Nível de Acesso: Diferente de 'comum' {user?.nivel_acesso !== 'comum' ? '✓' : '✗'}</li>
+              </ul>
+              <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                <p className="mb-1"><strong>Dados do Usuário:</strong></p>
+                <p>Nome: {user?.nome}</p>
+                <p>Cargo: {user?.cargo}</p>
+                <p>Nível de Acesso: {user?.nivel_acesso}</p>
+                <p>Email: {user?.email}</p>
+                <p>Empresa: {company?.nome} (ID: {company?.uid})</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center mb-6">
         <button
           onClick={() => navigate('/eleitores')}

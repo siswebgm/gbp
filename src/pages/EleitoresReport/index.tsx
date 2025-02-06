@@ -4,17 +4,22 @@ import { useCompanyStore } from '../../store/useCompanyStore';
 import { eleitorStatsService, EleitorStats } from '../../services/eleitorStats';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { ChevronLeft, Loader2, Download, Users2, Building2, Home, MapPin } from 'lucide-react';
+import { ChevronLeft, Loader2, Download, Users2, Building2, Home, MapPin, Info, AlertCircle } from 'lucide-react';
 import * as ExcelJS from 'exceljs';
 import { TablePagination } from '../../components/TablePagination';
+import { useAuth } from '../../providers/AuthProvider';
+import { CargoEnum } from '../../services/auth';
 
 export function EleitoresReport() {
   const navigate = useNavigate();
   const { company } = useCompanyStore();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<EleitorStats | null>(null);
   const [bairroPages, setBairroPages] = useState<Record<string, number>>({});
   
+  const canAccess = user?.nivel_acesso !== 'comum';
+
   // Estados para paginação
   const [cidadePage, setCidadePage] = useState(1);
   const [indicadoPage, setIndicadoPage] = useState(1);
@@ -22,11 +27,15 @@ export function EleitoresReport() {
   const [zonaPage, setZonaPage] = useState(1);
   const [usuarioPage, setUsuarioPage] = useState(1);
   const itemsPerPage = 10;
-  const bairrosPerPage = 5; // Número menor para melhor visualização dos bairros
+  const bairrosPerPage = 5;
 
   useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
     loadStats();
-  }, [company?.uid]);
+  }, [company?.uid, canAccess]);
 
   const loadStats = async () => {
     if (!company?.uid) {
@@ -321,7 +330,7 @@ export function EleitoresReport() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">

@@ -7,11 +7,20 @@ export class AuthError extends Error {
   }
 }
 
+export const CargoEnum = {
+  ADMIN: 'admin' as const,
+  EDITOR: 'editor' as const,
+  VIEWER: 'viewer' as const
+} as const;
+
+export type CargoType = typeof CargoEnum[keyof typeof CargoEnum];
+
 export interface AuthData {
+  id: number;
   uid: string;
   nome: string | null;
-  email: string | null;
-  cargo: string | null;
+  email: string;
+  cargo: CargoType | null;
   nivel_acesso: string | null;
   permissoes: string[];
   empresa_uid: string | null;
@@ -20,17 +29,19 @@ export interface AuthData {
   ultimo_acesso: string | null;
   created_at: string | null;
   foto: string | null;
+  notification_token: string | null;
+  notification_status: string | null;
+  notification_updated_at: string | null;
 }
 
 export const authService = {
   async login(email: string, password: string): Promise<AuthData> {
     try {
-      console.log('Login attempt with:', { email });
-
       // Busca o usuário na tabela gbp_usuarios pelo email e senha
       const { data: user, error } = await supabaseClient
         .from('gbp_usuarios')
         .select(`
+          id,
           uid,
           nome,
           email,
@@ -43,44 +54,40 @@ export const authService = {
           ultimo_acesso,
           created_at,
           foto,
-          senha
+          notification_token,
+          notification_status,
+          notification_updated_at
         `)
-        .eq('email', email.toString())
-        .eq('senha', password) // Adiciona verificação da senha
+        .eq('email', email)
+        .eq('senha', password)
         .single();
 
-      console.log('User data:', user);
-
-      if (error || !user) {
-        console.error('Erro ao buscar usuário:', error);
-        throw new AuthError('Email ou senha inválidos');
+      if (error) {
+        console.error('Error fetching user:', error);
+        throw new AuthError('Erro ao buscar usuário');
       }
 
-      // Verifica se o usuário está ativo
-      if (user.status !== 'active') {
-        throw new AuthError('Usuário inativo ou bloqueado');
+      if (!user) {
+        console.error('User not found');
+        throw new AuthError('Usuário não encontrado');
       }
 
-      // Remove o campo senha antes de retornar/salvar os dados
-      const { senha, ...userData } = user;
+      // Atualiza o último acesso
+      const { error: updateError } = await supabaseClient
+        .from('gbp_usuarios')
+        .update({ ultimo_acesso: new Date().toISOString() })
+        .eq('uid', user.uid);
 
-      // Atualiza último acesso
-      await this.updateLastAccess(userData.uid);
+      if (updateError) {
+        console.error('Error updating last access:', updateError);
+      }
 
-      // Salva dados no localStorage
-      localStorage.setItem('gbp_user', JSON.stringify(userData));
-      localStorage.setItem('empresa_uid', userData.empresa_uid || '');
-      localStorage.setItem('user_uid', userData.uid);
+      // Armazena os dados do usuário no localStorage
+      localStorage.setItem('gbp_user', JSON.stringify(user));
+      localStorage.setItem('empresa_uid', user.empresa_uid || '');
+      localStorage.setItem('user_uid', user.uid);
 
-      // Cria uma sessão personalizada
-      const session = {
-        user: userData,
-        access_token: btoa(JSON.stringify({ uid: userData.uid, email: userData.email })), // Token simples para manter compatibilidade
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // Expira em 24 horas
-      };
-      localStorage.setItem('supabase.auth.token', JSON.stringify(session));
-
-      return userData;
+      return user as AuthData;
     } catch (error) {
       console.error('Login error:', error);
       if (error instanceof AuthError) {
@@ -90,13 +97,11 @@ export const authService = {
     }
   },
 
-  async updateLastAccess(userId: string) {
+  async updateLastAccess(userId: string): Promise<void> {
     try {
       const { error } = await supabaseClient
         .from('gbp_usuarios')
-        .update({ 
-          ultimo_acesso: new Date().toISOString()
-        })
+        .update({ ultimo_acesso: new Date().toISOString() })
         .eq('uid', userId);
 
       if (error) {

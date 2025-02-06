@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { supabaseClient } from '../../../lib/supabase';
 import { useCompanyStore } from '../../../store/useCompanyStore';
+import { useAuth } from '../../../providers/AuthProvider';
 import { formatDate } from '../../../utils/format';
 
 interface Oficio {
@@ -18,11 +19,18 @@ interface Oficio {
 export default function Oficios() {
   const navigate = useNavigate();
   const company = useCompanyStore((state) => state.company);
+  const { user } = useAuth();
+  const canAccess = user?.nivel_acesso !== 'comum';
   console.log('Empresa atual:', company);
   const [oficios, setOficios] = useState<Oficio[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+
     const fetchOficios = async () => {
       if (!company?.uid) {
         setIsLoading(false);
@@ -46,7 +54,7 @@ export default function Oficios() {
     };
 
     fetchOficios();
-  }, [company?.uid]);
+  }, [company?.uid, canAccess]);
 
   if (isLoading) {
     return (

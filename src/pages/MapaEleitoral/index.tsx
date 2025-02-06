@@ -2,6 +2,7 @@ import { useEffect, useState, Suspense, lazy } from 'react';
 import { Map } from 'lucide-react';
 import { supabaseClient } from '../../lib/supabase';
 import { useCompanyStore } from '../../store/useCompanyStore';
+import { useAuth } from '../../providers/AuthProvider';
 
 // Importando o mapa com lazy loading
 const MapComponent = lazy(() => import('../../components/ElectoralMap'));
@@ -15,12 +16,20 @@ interface Voter {
 }
 
 export function ElectoralMap() {
+  const { user } = useAuth();
+  const canAccess = user?.nivel_acesso !== 'comum';
+
   const [voters, setVoters] = useState<Voter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const company = useCompanyStore(state => state.company);
 
   useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+
     async function loadVoters() {
       if (!company?.id) {
         setError('Empresa não selecionada');
@@ -87,7 +96,7 @@ export function ElectoralMap() {
     }
 
     loadVoters();
-  }, [company]);
+  }, [company, canAccess]);
 
   // Calcula estatísticas
   const totalEleitores = voters.length;

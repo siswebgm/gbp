@@ -1,61 +1,30 @@
 import { create } from 'zustand';
-
-interface User {
-  uid: string;
-  nome: string;
-  email: string;
-  empresa_uid: string;
-  role: 'admin' | 'attendant';
-  foto?: string | null;
-}
+import { AuthData } from '../services/auth';
 
 interface AuthStore {
-  user: User | null;
   isAuthenticated: boolean;
-  setUser: (user: User) => void;
+  user: AuthData | null;
+  setUser: (user: AuthData | null) => void;
   logout: () => void;
-  getStoredUser: () => User | null;
 }
 
-export const useAuthStore = create<AuthStore>((set, get) => ({
-  user: null,
-  isAuthenticated: false,
-
-  setUser: (user: User) => {
-    console.log('Atualizando usuário no AuthStore:', user);
-    set({ user, isAuthenticated: true });
+export const useAuthStore = create<AuthStore>((set) => ({
+  isAuthenticated: !!localStorage.getItem('gbp_user'),
+  user: JSON.parse(localStorage.getItem('gbp_user') || 'null'),
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem('gbp_user', JSON.stringify(user));
+      set({ user, isAuthenticated: true });
+    } else {
+      localStorage.removeItem('gbp_user');
+      set({ user: null, isAuthenticated: false });
+    }
   },
-
   logout: () => {
-    console.log('Limpando estado do usuário no AuthStore');
+    localStorage.removeItem('gbp_user');
+    localStorage.removeItem('empresa_uid');
+    localStorage.removeItem('user_uid');
+    localStorage.removeItem('supabase.auth.token');
     set({ user: null, isAuthenticated: false });
   },
-
-  getStoredUser: () => {
-    const { user } = get();
-    if (user) {
-      return user;
-    }
-
-    try {
-      const storedUser = localStorage.getItem('gbp_user');
-      if (storedUser) {
-        const parsedUser = JSON.parse(storedUser);
-        if (parsedUser && parsedUser.uid && parsedUser.empresa_uid) {
-          return {
-            uid: parsedUser.uid,
-            nome: parsedUser.nome,
-            email: parsedUser.email || '',
-            empresa_uid: parsedUser.empresa_uid,
-            role: parsedUser.nivel_acesso as 'admin' | 'attendant',
-            foto: parsedUser.foto || null
-          };
-        }
-      }
-      return null;
-    } catch (error) {
-      console.error('Erro ao recuperar usuário do localStorage:', error);
-      return null;
-    }
-  }
 }));

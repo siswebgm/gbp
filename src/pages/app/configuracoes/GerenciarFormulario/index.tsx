@@ -35,6 +35,8 @@ import { categoryService } from '../../../../services/categories';
 import { Category } from '../../../../types/category';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useAuth } from '../../../../providers/AuthProvider';
+import { useNavigate } from 'react-router-dom';
 
 interface Field {
   id: string;
@@ -64,7 +66,6 @@ interface FormConfig {
 interface Category {
   uid: string;
   nome: string;
-  descricao: string;
   empresa_uid: string;
   created_at: string;
 }
@@ -135,6 +136,17 @@ const predefinedBackgrounds = [
 export default function GerenciarFormulario() {
   const { id: formularioId } = useParams();
   const company = useCompanyStore((state) => state.company);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const canAccess = user?.nivel_acesso !== 'comum';
+
+  useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+  }, [canAccess, navigate]);
+
   const [categorias, setCategorias] = useState<Category[]>([]);
   const [selectedCategoria, setSelectedCategoria] = useState<string>('');
   const [formConfigs, setFormConfigs] = useState<FormConfig[]>([]);
@@ -253,7 +265,7 @@ export default function GerenciarFormulario() {
         setIsLoading(true);
         const { data: categorias, error: categoriasError } = await supabaseClient
           .from('gbp_categorias')
-          .select('uid, nome, descricao, empresa_uid, created_at')
+          .select('uid, nome, empresa_uid, created_at')
           .eq('empresa_uid', company?.uid)
           .order('nome');
 

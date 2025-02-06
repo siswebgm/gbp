@@ -9,6 +9,8 @@ import { useEleitores } from '../../hooks/useEleitores';
 import { useEleitorOptions } from '../../hooks/useEleitorOptions';
 import { EleitorFilters, Eleitor } from '../../types/eleitor';
 import { eleitorService } from '../../services/eleitorService';
+import { useAuth } from '../../providers/AuthProvider';
+import { CargoEnum } from '../../services/auth';
 import { 
   Filter, 
   Search, 
@@ -135,6 +137,9 @@ interface TableEleitor {
 export function Eleitores() {
   const navigate = useNavigate();
   const company = useCompanyStore((state: { company: any }) => state.company);
+  const { user } = useAuth();
+  const isAdmin = user?.cargo === CargoEnum.ADMIN;
+  const canExport = isAdmin && user?.nivel_acesso !== 'comum';
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [filters, setFilters] = useState<EleitorFilters>({
     nome: '',
@@ -161,6 +166,31 @@ export function Eleitores() {
 
   // Hooks para carregar os dados
   const { isLoading: isLoadingOptions } = useEleitorOptions();
+  const loadEleitores = useCallback(async () => {
+    if (!company?.uid) return;
+
+    setIsLoading(true);
+    try {
+      const response = await eleitorService.list(
+        company.uid,
+        filters,
+        currentPage,
+        pageSize,
+        user?.uid, // Passa o uid do usuário atual
+        user?.nivel_acesso // Passa o nível de acesso
+      );
+
+      setEleitores(response.data);
+      setTotal(response.total);
+      setTotalPages(response.totalPages);
+    } catch (error) {
+      console.error('Erro ao carregar eleitores:', error);
+      toast.error('Erro ao carregar eleitores');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [company?.uid, filters, currentPage, pageSize, user?.uid, user?.nivel_acesso]);
+
   const { 
     eleitores, 
     total,
@@ -273,78 +303,84 @@ export function Eleitores() {
   const endIndex = Math.min(currentPage * pageSize, total);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Grupo com fundo branco */}
-      <div className="bg-white shadow-sm border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            {/* Título e Descrição */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center">
-                <Users className="h-8 w-8 text-primary-600 mr-3" />
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:truncate">
-                      Eleitores
-                    </h1>
-                    <span className="px-2.5 py-0.5 rounded-full text-sm font-medium bg-primary-100 text-primary-800 dark:bg-primary-900/20 dark:text-primary-300">
-                      {total}
-                    </span>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
+          <div className="py-6">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+              {/* Filtros e Ações */}
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                {/* Título e Descrição */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center">
+                    <Users className="h-8 w-8 text-primary-600 mr-3" />
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:truncate">
+                          Eleitores
+                        </h1>
+                        <span className="px-2.5 py-0.5 rounded-full text-sm font-medium bg-primary-100 text-primary-800 dark:bg-primary-900/20 dark:text-primary-300">
+                          {total}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">
+                        Gerencie sua base de eleitores de forma eficiente. Adicione, edite e organize todos os seus contatos.
+                      </p>
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">
-                    Gerencie sua base de eleitores de forma eficiente. Adicione, edite e organize todos os seus contatos.
-                  </p>
+                </div>
+
+                {/* Grupo de Botões */}
+                <div className="hidden md:flex items-center gap-3">
+                  {/* Botão Filtros */}
+                  <button
+                    onClick={() => setShowFilters(true)}
+                    className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600"
+                  >
+                    <Filter className="h-4 w-4 mr-2" />
+                    Filtros
+                    {Object.values(filters).some(value => value) && (
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                        Ativos
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Botão Exportar */}
+                  <button
+                    onClick={() => setIsExportarModalOpen(true)}
+                    disabled={!canExport || selectedEleitores.length === 0}
+                    className="inline-flex items-center gap-x-1.5 rounded-md bg-primary-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={!canExport ? "Apenas administradores com nível de acesso diferente de 'comum' podem exportar" : selectedEleitores.length === 0 ? "Selecione pelo menos um eleitor para exportar" : ""}
+                  >
+                    <FileSpreadsheet className="-ml-0.5 h-5 w-5" aria-hidden="true" />
+                    {canExport ? 'Exportar' : 'Bloqueado'}
+                    {selectedEleitores.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-primary-700 px-2 py-0.5 text-xs">
+                        {selectedEleitores.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Botão Novo Eleitor */}
+                  <button
+                    onClick={() => navigate('/app/eleitores/novo')}
+                    className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-transparent text-sm font-medium text-white bg-primary-600 shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Novo Eleitor
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* Grupo de Botões */}
-            <div className="hidden md:flex items-center gap-3">
-              {/* Botão Filtros */}
-              <button
-                onClick={() => setShowFilters(true)}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600"
-              >
-                <Filter className="h-4 w-4 mr-2" />
-                Filtros
-                {Object.values(filters).some(value => value) && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-                    Ativos
-                  </span>
-                )}
-              </button>
-
-              {/* Botão Exportar */}
-              <button
-                onClick={() => setIsExportarModalOpen(true)}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600"
-              >
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Exportar
-                {selectedEleitores.length > 0 && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-                    {selectedEleitores.length}
-                  </span>
-                )}
-              </button>
-
-              {/* Botão Novo Eleitor */}
-              <button
-                onClick={() => navigate('/app/eleitores/novo')}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-transparent text-sm font-medium text-white bg-primary-600 shadow-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Novo Eleitor
-              </button>
+              {/* Filtros Ativos */}
+              {Object.values(filters).some(value => value) && (
+                <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <ActiveFilters filters={filters} onFilterChange={handleFilterChange} />
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Filtros Ativos */}
-          {Object.values(filters).some(value => value) && (
-            <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
-              <ActiveFilters filters={filters} onFilterChange={handleFilterChange} />
-            </div>
-          )}
         </div>
       </div>
 

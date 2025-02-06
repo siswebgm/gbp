@@ -12,17 +12,19 @@ type SettingsTab = 'categories' | 'indicados' | 'birthday' | 'whatsapp' | 'uploa
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('categories');
-  const { isAuthenticated, isLoading, session } = useAuth();
+  const { isAuthenticated, isLoading, session, user } = useAuth();
   const company = useCompanyStore((state) => state.company);
   const location = useLocation();
   const navigate = useNavigate();
 
+  const canAccess = user?.nivel_acesso !== 'comum';
+
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !company)) {
+    if (!isLoading && (!isAuthenticated || !company || !canAccess)) {
       navigate('/app');
       return;
     }
-  }, [isLoading, isAuthenticated, company, navigate]);
+  }, [isLoading, isAuthenticated, company, canAccess, navigate]);
 
   useEffect(() => {
     if (activeTab === 'upload') {

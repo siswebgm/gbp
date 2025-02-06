@@ -6,13 +6,13 @@ import { z } from 'zod';
 import { User, Users, Clock, Hourglass, CheckCircle, XCircle, FileText, Tag, Check } from 'lucide-react';
 import { supabaseClient } from '../../../lib/supabase';
 import { Search, AlertCircle, ChevronDown } from 'lucide-react';
-import { useAttendanceCategories } from '../../../hooks/useAttendanceCategories';
 import { useCompanyStore } from '../../../store/useCompanyStore';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useUserData } from '../../../hooks/useUserData';
 import { useIndicados } from '../../../hooks/useIndicados';
 import { Listbox, Transition } from '@headlessui/react';
-import toast from 'react-hot-toast';
+import { useToast } from "../../../components/ui/use-toast";
+import { useCategories } from '../../../hooks/useCategories';
 
 interface AttendanceFormData {
   categoria_uid: string;
@@ -65,10 +65,11 @@ export function AttendanceFormContent() {
   const { data: indicados } = useIndicados();
   const [selectedVoter, setSelectedVoter] = useState<any>(null);
   const [showVoterSearch, setShowVoterSearch] = useState(true);
-  const { data: categories } = useAttendanceCategories();
+  const { data: categories } = useCategories();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<any>(null);
+  const { toast } = useToast();
 
   const {
     register,
@@ -177,11 +178,22 @@ export function AttendanceFormContent() {
 
       console.log('Atendimento criado:', createdAttendance);
 
-      toast.success('Atendimento registrado com sucesso!');
+      toast({
+        title: "✨ Atendimento registrado com sucesso!",
+        description: `O atendimento #${createdAttendance.numero} foi criado e o eleitor será notificado.`,
+        variant: "success",
+        duration: 5000,
+      });
+      
       navigate('/app/atendimentos');
     } catch (error: any) {
       console.error('Erro ao salvar atendimento:', error);
-      toast.error(error.message || 'Erro ao registrar atendimento');
+      toast({
+        title: "😕 Ops! Algo deu errado",
+        description: error.message || "Não foi possível registrar o atendimento. Por favor, tente novamente em alguns instantes.",
+        variant: "destructive",
+        duration: 5000,
+      });
     } finally {
       setIsLoading(false);
     }

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabaseClient } from '../lib/supabase';
 
 interface Company {
   id: number;
   nome: string;
+  uid: string;
 }
 
 export function useCompany() {
@@ -13,30 +14,24 @@ export function useCompany() {
   useEffect(() => {
     async function loadCompany() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await supabaseClient.auth.getUser();
         
         if (!user) {
           setCompany(null);
           return;
         }
 
-        const { data: userData } = await supabase
-          .from('gbp_usuarios')
-          .select('empresa_id')
-          .eq('id', user.id)
+        const { data: companyData } = await supabaseClient
+          .from('gbp_empresa')
+          .select('*')
+          .eq('uid', user.user_metadata.empresa_uid)
           .single();
 
-        if (userData?.empresa_id) {
-          const { data: companyData } = await supabase
-            .from('gbp_empresas')
-            .select('*')
-            .eq('id', userData.empresa_id)
-            .single();
-
+        if (companyData) {
           setCompany(companyData);
         }
       } catch (error) {
-        console.error('Erro ao carregar empresa:', error);
+        console.error('Error loading company:', error);
         setCompany(null);
       } finally {
         setIsLoading(false);
@@ -46,9 +41,5 @@ export function useCompany() {
     loadCompany();
   }, []);
 
-  return {
-    company,
-    isLoading,
-    hasCompany: !!company
-  };
+  return company;
 }

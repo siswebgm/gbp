@@ -34,9 +34,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/ta
 import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar';
 import { cn } from '../../lib/utils';
 import { UserFormModal } from '@/components/UserFormModal';
+import { useAuth } from '../../providers/AuthProvider';
 
 export function Users() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canAccess = user?.nivel_acesso !== 'comum';
+
+  useEffect(() => {
+    if (!canAccess) {
+      navigate('/app');
+      return;
+    }
+  }, [canAccess, navigate]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);

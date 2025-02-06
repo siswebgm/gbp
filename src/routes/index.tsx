@@ -52,7 +52,13 @@ export const router = createBrowserRouter([
           },
           {
             path: 'eleitores',
-            element: <Eleitores />
+            element: (
+              <ProtectedRoute>
+                <Suspense fallback={<div>Carregando...</div>}>
+                  <Eleitores />
+                </Suspense>
+              </ProtectedRoute>
+            )
           },
           {
             path: 'documentos',

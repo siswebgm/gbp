@@ -23,8 +23,41 @@ export const NestedCategoryDropdown: React.FC<NestedCategoryDropdownProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [openCategories, setOpenCategories] = useState<string[]>([]);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Controla o scroll da página
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    
+    if (isOpen) {
+      const scrollbarWidth = window.innerWidth - html.clientWidth;
+      html.style.overflow = 'hidden';
+      html.style.paddingRight = `${scrollbarWidth}px`;
+      body.style.overflow = 'hidden';
+      body.style.position = 'fixed';
+      body.style.top = `-${window.scrollY}px`;
+      body.style.width = '100%';
+    } else {
+      const scrollY = body.style.top;
+      html.style.overflow = '';
+      html.style.paddingRight = '';
+      body.style.overflow = '';
+      body.style.position = '';
+      body.style.top = '';
+      body.style.width = '';
+      window.scrollTo(0, parseInt(scrollY || '0') * -1);
+    }
+
+    return () => {
+      html.style.overflow = '';
+      html.style.paddingRight = '';
+      body.style.overflow = '';
+      body.style.position = '';
+      body.style.top = '';
+      body.style.width = '';
+    };
+  }, [isOpen]);
 
   // Organizando as categorias por tipo
   const categorizedData = categories.reduce((acc, category) => {
@@ -39,18 +72,6 @@ export const NestedCategoryDropdown: React.FC<NestedCategoryDropdownProps> = ({
   // Encontra o nome da categoria selecionada
   const selectedCategory = categories.find(cat => cat.uid === value);
 
-  // Atualiza a posição do dropdown
-  const updateDropdownPosition = () => {
-    if (dropdownRef.current) {
-      const rect = dropdownRef.current.getBoundingClientRect();
-      setDropdownPosition({
-        top: rect.bottom + window.scrollY,
-        left: rect.left,
-        width: dropdownRef.current.offsetWidth
-      });
-    }
-  };
-
   // Fecha o dropdown quando clicar fora
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -59,24 +80,13 @@ export const NestedCategoryDropdown: React.FC<NestedCategoryDropdownProps> = ({
       }
     };
 
-    const handleScroll = () => {
-      if (isOpen) {
-        updateDropdownPosition();
-      }
-    };
-
     if (isOpen) {
-      updateDropdownPosition();
       document.addEventListener('mousedown', handleClickOutside);
-      window.addEventListener('scroll', handleScroll);
-      window.addEventListener('resize', updateDropdownPosition);
-    }
 
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', updateDropdownPosition);
-    };
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
   }, [isOpen]);
 
   const toggleCategory = (categoryId: string) => {
@@ -92,8 +102,75 @@ export const NestedCategoryDropdown: React.FC<NestedCategoryDropdownProps> = ({
     setIsOpen(false);
   };
 
+  const renderDropdown = () => {
+    if (!isOpen) return null;
+
+    return (
+      <>
+        {/* Backdrop para evitar interações com elementos abaixo */}
+        <div 
+          className="fixed inset-0 bg-transparent"
+          style={{ zIndex: 40 }}
+          onClick={() => setIsOpen(false)}
+        />
+        
+        {/* Dropdown */}
+        <div
+          className="absolute bg-white border border-gray-200 rounded-md shadow-lg overflow-y-auto"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            maxHeight: '300px',
+            marginTop: '4px',
+            zIndex: 50
+          }}
+        >
+          {Object.entries(categorizedData).map(([tipo, categorias]) => (
+            <div key={tipo} className="border-b border-gray-200 last:border-0">
+              <div
+                className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50/80 dark:hover:bg-gray-700/80 bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600"
+                onClick={() => toggleCategory(tipo)}
+              >
+                <div className="flex items-center space-x-2">
+                  {openCategories.includes(tipo) ? (
+                    <ChevronDown className="h-4 w-4 text-blue-500" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-blue-500" />
+                  )}
+                  <span className="font-bold text-gray-900 dark:text-white text-sm uppercase tracking-wide">{tipo}</span>
+                </div>
+              </div>
+
+              {openCategories.includes(tipo) && (
+                <div className="bg-white dark:bg-gray-800 py-1">
+                  {categorias.map((category) => (
+                    <div
+                      key={category.uid}
+                      className={`pl-10 pr-4 py-2 cursor-pointer border-l-2 ${
+                        value === category.uid 
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 font-medium' 
+                          : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                      }`}
+                      onClick={() => handleSelect(category)}
+                    >
+                      <span className={`text-gray-700 dark:text-gray-300 ${value === category.uid ? 'text-blue-600 dark:text-blue-400' : ''}`}>
+                        {category.nome}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  };
+
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative w-full" ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -114,57 +191,7 @@ export const NestedCategoryDropdown: React.FC<NestedCategoryDropdownProps> = ({
 
       {error && <span className="text-red-500 text-sm">{error}</span>}
 
-      {isOpen && !isLoading && (
-        <div className="fixed inset-0 z-[9999] pointer-events-none">
-          <div 
-            className="absolute w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg max-h-[300px] overflow-auto pointer-events-auto"
-            style={{
-              top: dropdownPosition.top,
-              left: dropdownPosition.left,
-              width: dropdownPosition.width,
-              maxHeight: '300px'
-            }}
-          >
-            {Object.entries(categorizedData).map(([tipo, categorias]) => (
-              <div key={tipo} className="border-b border-gray-200 dark:border-gray-700 last:border-0">
-                <div
-                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50/80 dark:hover:bg-gray-700/80 bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600"
-                  onClick={() => toggleCategory(tipo)}
-                >
-                  <div className="flex items-center space-x-2">
-                    {openCategories.includes(tipo) ? (
-                      <ChevronDown className="h-4 w-4 text-blue-500" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-blue-500" />
-                    )}
-                    <span className="font-bold text-gray-900 dark:text-white text-sm uppercase tracking-wide">{tipo}</span>
-                  </div>
-                </div>
-
-                {openCategories.includes(tipo) && (
-                  <div className="bg-white dark:bg-gray-800 py-1">
-                    {categorias.map((category) => (
-                      <div
-                        key={category.uid}
-                        className={`pl-10 pr-4 py-2 cursor-pointer border-l-2 ${
-                          value === category.uid 
-                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 font-medium' 
-                            : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                        }`}
-                        onClick={() => handleSelect(category)}
-                      >
-                        <span className={`text-gray-700 dark:text-gray-300 ${value === category.uid ? 'text-blue-600 dark:text-blue-400' : ''}`}>
-                          {category.nome}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {renderDropdown()}
     </div>
   );
 };
