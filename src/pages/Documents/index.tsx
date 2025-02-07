@@ -55,35 +55,6 @@ export function Documents() {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Banner de Permissões */}
-      <div className="bg-blue-50 border-l-4 border-blue-400 p-4 dark:bg-blue-900/20 dark:border-blue-800">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <Info className="h-5 w-5 text-blue-400" aria-hidden="true" />
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200">
-              Informações de Acesso aos Documentos
-            </h3>
-            <div className="mt-2 text-sm text-blue-700 dark:text-blue-300">
-              <p className="mb-1">
-                <strong>Permissões necessárias:</strong>
-              </p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>Nível de Acesso: Diferente de 'comum' {user?.nivel_acesso !== 'comum' ? '✓' : '✗'}</li>
-              </ul>
-              <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
-                <p className="mb-1"><strong>Dados do Usuário:</strong></p>
-                <p>Nome: {user?.nome}</p>
-                <p>Cargo: {user?.cargo}</p>
-                <p>Nível de Acesso: {user?.nivel_acesso}</p>
-                <p>Email: {user?.email}</p>
-                <p>Empresa: {company?.nome} (ID: {company?.uid})</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
       <div className="flex-1 py-2 md:py-6 px-2 md:px-4">
         <div className="flex flex-col space-y-2 md:space-y-4 max-w-[1600px] mx-auto">
           {/* Header Section */}

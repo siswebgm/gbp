@@ -22,7 +22,35 @@ export function FiltersModal({
     responsaveis: users,
     isLoading 
   } = useEleitorOptions();
+
   const { data: categorias, isLoading: isLoadingCategorias } = useCategories();
+
+  console.log('[DEBUG] FiltersModal - Indicadores:', indications);
+  console.log('[DEBUG] FiltersModal - Responsáveis:', users);
+
+  const indicadoresOptions = [
+    { value: '', label: 'Selecione...' },
+    ...(indications || []).map(item => ({
+      value: item.value,
+      label: item.label || 'Sem nome'
+    }))
+  ];
+
+  const responsaveisOptions = [
+    { value: '', label: 'Selecione...' },
+    ...(users || []).map(item => ({
+      value: item.value,
+      label: item.label || 'Sem nome'
+    }))
+  ];
+
+  const categoriasOptions = [
+    { value: '', label: 'Selecione...' },
+    ...(categorias?.map(category => ({ 
+      value: category.uid, 
+      label: category.nome 
+    })) || [])
+  ];
 
   const handleFilterChange = (field: keyof EleitorFilters, value: any) => {
     onFilterChange({
@@ -66,13 +94,14 @@ export function FiltersModal({
     </div>
   );
 
-  const SelectField = ({ id, label, options, value, icon: Icon, isLoading }: {
+  const SelectField = ({ id, label, options, value, icon: Icon, isLoading, onChange }: {
     id: keyof EleitorFilters;
     label: string;
     options: { value: string; label: string }[];
     value: string | undefined;
     icon?: React.ComponentType<any>;
     isLoading?: boolean;
+    onChange?: (value: string) => void;
   }) => (
     <div className="relative group">
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 transition-colors group-hover:text-primary-600 dark:group-hover:text-primary-400">
@@ -87,7 +116,7 @@ export function FiltersModal({
         <select
           id={id}
           value={value || ''}
-          onChange={(e) => handleFilterChange(id, e.target.value)}
+          onChange={(e) => onChange ? onChange(e.target.value) : handleFilterChange(id, e.target.value)}
           disabled={isLoading}
           className={`block w-full h-10 ${Icon ? 'pl-9' : 'pl-3'} pr-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 
             focus:ring-2 focus:ring-primary-500 focus:border-primary-500 
@@ -98,9 +127,8 @@ export function FiltersModal({
             appearance-none cursor-pointer
             disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          <option value="">{isLoading ? 'Carregando...' : 'Selecione...'}</option>
-          {!isLoading && options.map((option) => (
-            <option key={option.value} value={option.value}>
+          {options.map((option, index) => (
+            <option key={`${id}-${option.value || 'empty'}-${index}`} value={option.value}>
               {option.label}
             </option>
           ))}
@@ -164,27 +192,30 @@ export function FiltersModal({
                 <SelectField 
                   id="categoria_uid" 
                   label="Categoria" 
-                  options={categorias.map(category => ({ 
-                    value: category.uid, 
-                    label: category.nome 
-                  }))} 
-                  value={filters.categoria_uid}
+                  options={categoriasOptions}
+                  value={typeof filters.categoria_uid === 'object' ? filters.categoria_uid.uid : filters.categoria_uid}
+                  onChange={(value) => {
+                    const categoria = categorias?.find(c => c.uid === value);
+                    handleFilterChange('categoria_uid', categoria ? { uid: categoria.uid, nome: categoria.nome } : value);
+                  }}
                   icon={User2}
                   isLoading={isLoadingCategorias}
                 />
                 <SelectField 
-                  id="indicado_uid" 
+                  id="indicado" 
                   label="Indicado por" 
-                  options={indications.map(indication => ({ value: indication.uid, label: indication.name }))} 
-                  value={filters.indicado_uid}
+                  options={indicadoresOptions}
+                  value={filters.indicado}
                   icon={User2}
+                  isLoading={isLoading}
                 />
                 <SelectField 
-                  id="responsavel_uid" 
+                  id="responsavel" 
                   label="Responsável" 
-                  options={users.map(user => ({ value: user.uid, label: user.name }))} 
-                  value={filters.responsavel_uid}
+                  options={responsaveisOptions}
+                  value={filters.responsavel}
                   icon={User2}
+                  isLoading={isLoading}
                 />
               </div>
             </div>
@@ -201,9 +232,9 @@ export function FiltersModal({
                     bairro: '',
                     categoria_uid: undefined,
                     logradouro: '',
-                    indicado_uid: '',
+                    indicado: '',
                     cep: '',
-                    responsavel_uid: '',
+                    responsavel: '',
                     cidade: '',
                     whatsapp: '',
                     cpf: '',

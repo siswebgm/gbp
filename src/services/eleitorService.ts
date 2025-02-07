@@ -60,19 +60,20 @@ class EleitorService {
         query = query.ilike('bairro', `%${filters.bairro}%`);
       }
       if (filters.categoria_uid) {
-        query = query.eq('categoria_uid', filters.categoria_uid);
+        query = query.eq('categoria_uid', typeof filters.categoria_uid === 'object' ? filters.categoria_uid.uid : filters.categoria_uid);
       }
       if (filters.logradouro) {
         query = query.ilike('logradouro', `%${filters.logradouro}%`);
       }
       if (filters.indicado) {
-        query = query.eq('indicado', filters.indicado);
+        query = query.eq('indicado_uid', filters.indicado);
       }
       if (filters.cep) {
         query = query.eq('cep', filters.cep);
       }
       if (filters.responsavel) {
-        query = query.eq('responsavel', filters.responsavel);
+        console.log('[DEBUG] Aplicando filtro de responsável:', filters.responsavel);
+        query = query.eq('usuario_uid', filters.responsavel);
       }
       if (filters.cidade) {
         query = query.ilike('cidade', `%${filters.cidade}%`);
@@ -150,16 +151,20 @@ class EleitorService {
         query = query.ilike('logradouro', `%${filters.logradouro}%`);
       }
       if (filters.indicado) {
-        query = query.eq('indicacao', filters.indicado);
+        query = query.eq('indicado_uid', filters.indicado);
       }
       if (filters.cep) {
         query = query.eq('cep', filters.cep);
       }
       if (filters.responsavel) {
-        query = query.eq('responsavel', filters.responsavel);
+        console.log('[DEBUG] Aplicando filtro de responsável:', filters.responsavel);
+        query = query.eq('usuario_uid', filters.responsavel);
       }
       if (filters.cidade) {
         query = query.eq('cidade', filters.cidade);
+      }
+      if (filters.categoria_uid) {
+        query = query.eq('categoria_uid', typeof filters.categoria_uid === 'object' ? filters.categoria_uid.uid : filters.categoria_uid);
       }
 
       // Aplica paginação
@@ -397,13 +402,18 @@ class EleitorService {
 
   async getCategoriasOptions(empresa_uid: string) {
     try {
+      console.log('[DEBUG] Buscando categorias para empresa:', empresa_uid);
       const { data, error } = await supabaseClient
-        .from('gbp_categorias_eleitor')
+        .from('gbp_categorias')
         .select('uid, nome')
         .eq('empresa_uid', empresa_uid)
         .order('nome');
 
-      if (error) throw error;
+      if (error) {
+        console.error('[DEBUG] Erro ao buscar categorias:', error);
+        throw error;
+      }
+      console.log('[DEBUG] Categorias encontradas:', data);
       return data || [];
     } catch (error) {
       console.error('Erro ao buscar categorias:', error);
@@ -413,14 +423,18 @@ class EleitorService {
 
   async getIndicadoresOptions(empresa_uid: string) {
     try {
+      console.log('[DEBUG] Buscando indicadores para empresa:', empresa_uid);
       const { data, error } = await supabaseClient
-        .from('gbp_usuarios')
+        .from('gbp_indicado')
         .select('uid, nome')
         .eq('empresa_uid', empresa_uid)
-        .eq('status', 'Ativo')
         .order('nome');
 
-      if (error) throw error;
+      if (error) {
+        console.error('[DEBUG] Erro ao buscar indicadores:', error);
+        throw error;
+      }
+      console.log('[DEBUG] Indicadores encontrados:', data);
       return data || [];
     } catch (error) {
       console.error('Erro ao buscar indicadores:', error);
@@ -430,17 +444,42 @@ class EleitorService {
 
   async getResponsaveisOptions(empresa_uid: string) {
     try {
+      console.log('[DEBUG] Service - Buscando responsáveis para empresa:', empresa_uid);
+      
+      // Primeiro, vamos verificar se existem usuários sem filtros
+      const checkQuery = await supabaseClient
+        .from('gbp_usuarios')
+        .select('count')
+        .eq('empresa_uid', empresa_uid);
+      
+      console.log('[DEBUG] Service - Total de usuários na empresa:', checkQuery.data?.[0]?.count);
+
+      // Agora fazemos a query com os filtros
       const { data, error } = await supabaseClient
         .from('gbp_usuarios')
         .select('uid, nome')
         .eq('empresa_uid', empresa_uid)
-        .eq('status', 'Ativo')
         .order('nome');
 
-      if (error) throw error;
+      if (error) {
+        console.error('[DEBUG] Service - Erro ao buscar responsáveis:', error);
+        throw error;
+      }
+
+      console.log('[DEBUG] Service - Query responsáveis:', {
+        empresa_uid,
+        total: data?.length || 0
+      });
+      
+      if (!data || data.length === 0) {
+        console.log('[DEBUG] Service - Nenhum usuário encontrado para a empresa');
+      } else {
+        console.log('[DEBUG] Service - Responsáveis encontrados:', JSON.stringify(data, null, 2));
+      }
+
       return data || [];
     } catch (error) {
-      console.error('Erro ao buscar responsáveis:', error);
+      console.error('[DEBUG] Service - Erro ao buscar responsáveis:', error);
       return [];
     }
   }
@@ -466,19 +505,20 @@ class EleitorService {
         query = query.ilike('bairro', `%${filters.bairro}%`);
       }
       if (filters.categoria_uid) {
-        query = query.eq('categoria_uid', filters.categoria_uid);
+        query = query.eq('categoria_uid', typeof filters.categoria_uid === 'object' ? filters.categoria_uid.uid : filters.categoria_uid);
       }
       if (filters.logradouro) {
         query = query.ilike('logradouro', `%${filters.logradouro}%`);
       }
       if (filters.indicado) {
-        query = query.eq('indicado', filters.indicado);
+        query = query.eq('indicado_uid', filters.indicado);
       }
       if (filters.cep) {
         query = query.eq('cep', filters.cep);
       }
       if (filters.responsavel) {
-        query = query.eq('responsavel', filters.responsavel);
+        console.log('[DEBUG] Aplicando filtro de responsável:', filters.responsavel);
+        query = query.eq('usuario_uid', filters.responsavel);
       }
       if (filters.cidade) {
         query = query.ilike('cidade', `%${filters.cidade}%`);

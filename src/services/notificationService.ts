@@ -57,8 +57,8 @@ class NotificationService {
       // Primeiro, verificamos se o usuário existe
       const { data: user, error: userError } = await supabaseClient
         .from('gbp_usuarios')
-        .select('id, notification_token')
-        .eq('id', userId)
+        .select('uid, notification_token')
+        .eq('uid', userId)
         .single();
 
       if (userError) {
@@ -82,7 +82,7 @@ class NotificationService {
           notification_status: 'invalid_token',
           notification_updated_at: currentDate
         })
-        .eq('id', userId);
+        .eq('uid', userId);
 
       if (updateError) {
         console.error('Erro ao atualizar token do usuário:', {
@@ -191,8 +191,8 @@ class NotificationService {
       // Buscar tokens dos usuários com seus IDs
       const { data: users, error } = await supabaseClient
         .from('gbp_usuarios')
-        .select('id, notification_token, nome, email')
-        .in('id', userIds)
+        .select('uid, notification_token, nome, email')
+        .in('uid', userIds)
         .not('notification_token', 'is', null)
         .neq('notification_status', 'invalid_token');
 
@@ -210,7 +210,7 @@ class NotificationService {
       console.log('Debug - Usuários válidos para notificação:', {
         total: validUsers.length,
         usuarios: validUsers.map(u => ({ 
-          id: u.id, 
+          id: u.uid, 
           nome: u.nome || u.email,
           tokenParcial: u.notification_token?.substring(0, 10) + '...'
         }))
@@ -306,22 +306,22 @@ class NotificationService {
                 errorData.error?.status === 'NOT_FOUND' ||
                 errorData.error?.message?.includes('token')
               ) {
-                await this.handleInvalidToken(user.notification_token, user.id);
+                await this.handleInvalidToken(user.notification_token, user.uid);
                 throw new Error('Token inválido');
               }
               
               throw new Error(JSON.stringify(errorData));
             }
 
-            return { success: true, userId: user.id };
+            return { success: true, userId: user.uid };
           } catch (error) {
             console.error('Erro ao enviar notificação para usuário:', {
-              userId: user.id,
+              userId: user.uid,
               error: error instanceof Error ? error.message : String(error)
             });
             return { 
               success: false, 
-              userId: user.id,
+              userId: user.uid,
               error: String(error)
             };
           }

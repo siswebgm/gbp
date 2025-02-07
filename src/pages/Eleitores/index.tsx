@@ -55,7 +55,13 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ filters, onFilterChange }
     }
   };
 
-  const activeFilters = Object.entries(filters).filter(([_, value]) => value);
+  const activeFilters = Object.entries(filters).filter(([key, value]) => {
+    if (!value) return false;
+    if (key === 'categoria_uid') {
+      return typeof value === 'object' ? value.uid : value;
+    }
+    return true;
+  });
 
   if (activeFilters.length === 0) return null;
 
@@ -68,7 +74,20 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ filters, onFilterChange }
       
       <div className="flex flex-wrap gap-2">
         {activeFilters.map(([key, value]) => {
-          const displayValue = values[key]?.[value as string] || value;
+          let displayValue = value;
+          
+          // Se for categoria, usa o nome ao invés do UID
+          if (key === 'categoria_uid') {
+            if (typeof value === 'object' && value.nome) {
+              displayValue = value.nome;
+            } else {
+              // Se não tiver o objeto completo, usa o UID
+              displayValue = value;
+            }
+          } else {
+            displayValue = values[key]?.[value as string] || value;
+          }
+          
           return (
             <div
               key={key}
@@ -97,7 +116,7 @@ const ActiveFilters: React.FC<ActiveFiltersProps> = ({ filters, onFilterChange }
               zona: '',
               secao: '',
               bairro: '',
-              categoria: undefined,
+              categoria_id: undefined,
               logradouro: '',
               indicado: '',
               cep: '',

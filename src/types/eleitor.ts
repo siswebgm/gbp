@@ -71,4 +71,17 @@ export interface EleitorFilters {
   secao?: string;
   usuario_uid?: string;
   nivel_acesso?: string;
+  categoria_uid?: {
+    uid: string;
+    nome: string;
+  };
+  bairro?: string;
+  logradouro?: string;
+  indicado?: string;
+  cep?: string;
+  responsavel?: string;
+  cidade?: string;
+  genero?: string;
+  whatsapp?: string;
+  cpf?: string;
 }

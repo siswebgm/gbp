@@ -393,12 +393,30 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
         return;
       }
 
+      // Verifica se o user.uid existe, senão usa o user.id convertido para string
+      const responsavelUid = user.uid || String(user.id);
+
+      // Busca o último ID para gerar o próximo
+      const { data: maxIdResult, error: maxIdError } = await supabaseClient
+        .from('gbp_observacoes')
+        .select('id')
+        .order('id', { ascending: false })
+        .limit(1);
+
+      if (maxIdError) {
+        console.error('Erro ao buscar último ID:', maxIdError);
+        throw maxIdError;
+      }
+
+      const nextId = maxIdResult && maxIdResult.length > 0 ? Number(maxIdResult[0].id) + 1 : 1;
+
       const { error: observacaoError } = await supabaseClient
         .from('gbp_observacoes')
         .insert({
+          id: nextId,
           atendimento_uid: atendimento.uid,
           observacao: newObservation.trim(),
-          responsavel: user.id,
+          responsavel: responsavelUid,
           empresa_uid: atendimento.empresa_uid,
           created_at: new Date().toISOString()
         });
@@ -407,9 +425,10 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
         console.error('Erro detalhado ao salvar observação:', {
           error: observacaoError,
           payload: {
+            id: nextId,
             atendimento_uid: atendimento.uid,
             empresa_uid: atendimento.empresa_uid,
-            responsavel: user.id,
+            responsavel: responsavelUid,
             observacao: newObservation.trim()
           }
         });
@@ -427,19 +446,38 @@ export function AttendanceDrawer({ isOpen, onClose, atendimento: initialAtendime
 
   const onSubmitReminder = async (data: any) => {
     try {
-      const { data: reminderError } = await supabaseClient.from('gbp_lembretes').insert([
-        {
+      // Verifica se o user.uid existe, senão usa o user.id convertido para string
+      const userUid = user?.uid || String(user?.id);
+
+      const { error: reminderError } = await supabaseClient
+        .from('gbp_lembretes')
+        .insert({
           atendimento_uid: atendimento.uid,
           empresa_uid: atendimento.empresa_uid,
           title: data.titulo,
           description: data.descricao,
           due_date: `${data.data_lembrete}T${data.hora_lembrete}:00-03:00`,
-          created_by: user?.id,
-          updated_by: user?.id,
-        },
-      ]);
+          priority: data.prioridade || 'medium',
+          status: 'pending',
+          created_by: userUid,
+          updated_by: userUid,
+        });
 
       if (reminderError) {
+        console.error('Erro ao criar lembrete:', {
+          error: reminderError,
+          payload: {
+            atendimento_uid: atendimento.uid,
+            empresa_uid: atendimento.empresa_uid,
+            title: data.titulo,
+            description: data.descricao,
+            due_date: `${data.data_lembrete}T${data.hora_lembrete}:00-03:00`,
+            priority: data.prioridade || 'medium',
+            status: 'pending',
+            created_by: userUid,
+            updated_by: userUid,
+          }
+        });
         throw reminderError;
       }
 

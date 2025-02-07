@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Filter, Image, Video, Mic, FileText, Users, X, MessageSquare, Upload, Smartphone, Play, List, ListOrdered, Code, Building2, User, Info } from 'lucide-react';
+import { Send, Filter, Image, Video, Mic, FileText, Users, X, MessageSquare, Upload, Smartphone, Play, List, ListOrdered, Code, Building2, User, Info, Loader2, AlertTriangle, Tags, MapPin, Paperclip } from 'lucide-react';
 import { Card } from '../../components/Card';
 import { useToast } from '../../hooks/useToast';
 import { supabaseClient } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
-import { useCompany } from '../../hooks/useCompany';
+import { useCompanyStore } from '../../store/useCompanyStore';
 import { Loading } from '../../components/Loading';
 import { useFileUpload } from './hooks/useFileUpload';
-import { useCategories } from '../../features/categories/hooks/useCategories';
+import { useCategories } from '../../hooks/useCategories';
 import { Button } from '../../components/ui/button';
 import { WhatsAppPreview } from './components/WhatsAppPreview';
 import { Select } from '../../components/ui/select';
@@ -30,7 +30,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { UserBanner } from './components/UserBanner';
+import { UserBanner } from '../../components/UserBanner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../../components/ui/alert-dialog";
+import { Switch } from '../../components/ui/switch';
 
 interface FilterOption {
   id: string;
@@ -48,211 +60,273 @@ interface MediaFile {
 export function DisparoMidia() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const company = useCompany();
+  const company = useCompanyStore(state => state.company);
   const toast = useToast();
   const { uploadFile } = useFileUpload();
+  const [loading, setLoading] = useState(false);
+
+  // Carregar dados do usuário
+  useEffect(() => {
+    async function loadUserData() {
+      try {
+        const { data: { user: supabaseUser } } = await supabaseClient.auth.getUser();
+        console.log('Debug - Supabase User:', supabaseUser);
+      } catch (error) {
+        console.error('Erro ao carregar usuário:', error);
+      }
+    }
+    loadUserData();
+  }, []);
 
   // Estados
   const [message, setMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
-  const [selectedFilters, setSelectedFilters] = useState<FilterOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const [previewDisparo, setPreviewDisparo] = useState<any>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [useNomeDisparo, setUseNomeDisparo] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Estados para os filtros (arrays para múltipla seleção)
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(['all']);
-  const [selectedCities, setSelectedCities] = useState<string[]>(['all']);
-  const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<string[]>(['all']);
+  // Estados para filtros
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<string[]>([]);
   const [selectedGender, setSelectedGender] = useState<string>('all');
 
+  // Usar o hook de categorias
+  const { data: categories, isLoading: isLoadingCategories } = useCategories();
+
+  // Formatar categorias para o select
+  const formattedCategories = categories?.map(cat => ({
+    value: cat.uid,
+    label: cat.nome
+  })) || [];
+
   // Buscar opções de filtro
-  const { categories, cities, neighborhoods, genders } = useFilterOptions();
-
-  // Carregar dados iniciais
-  useEffect(() => {
-  }, []);
-
-  async function loadCidades() {
-    const { data } = await supabaseClient
-      .from('gbp_cidade')
-      .select('id, nome')
-      .order('nome');
-    if (data) return data;
-  }
-
-  async function loadBairros() {
-    const { data } = await supabaseClient
-      .from('gbp_bairro')
-      .select('id, nome')
-      .order('nome');
-    if (data) return data;
-  }
-
-  // Handlers para filtros
-  const handleFilterChange = (type: string, value: string, label: string) => {
-    const newFilter = {
-      id: `${type}-${value}`,
-      type: type as FilterOption['type'],
-      value,
-      label
-    };
-
-    // Verifica se o filtro já existe
-    const filterExists = selectedFilters.some(f => f.id === newFilter.id);
-
-    if (filterExists) {
-      // Remove o filtro se já existir
-      setSelectedFilters(prev => prev.filter(f => f.id !== newFilter.id));
-    } else {
-      // Adiciona o novo filtro
-      setSelectedFilters(prev => [...prev, newFilter]);
-    }
-  };
-
-  const handleRemoveFilter = (filter: FilterOption) => {
-    setSelectedFilters(prev => prev.filter(f => f.id !== filter.id));
-  };
-
-  const handleClearFilters = () => {
-    setSelectedFilters([]);
-  };
+  const { cities, neighborhoods, isLoading: isLoadingFilters } = useFilterOptions();
 
   // Handlers para múltipla seleção
   const handleCategoryChange = (value: string) => {
-    if (value === 'all') {
-      setSelectedCategories(['all']);
-    } else {
-      const newCategories = selectedCategories.filter(c => c !== 'all');
-      if (newCategories.includes(value)) {
-        const updated = newCategories.filter(c => c !== value);
-        setSelectedCategories(updated.length ? updated : ['all']);
-      } else {
-        setSelectedCategories([...newCategories, value]);
-      }
+    if (!value) {
+      setSelectedCategories([]);
+      return;
     }
+
+    setSelectedCategories(prev => {
+      const isSelected = prev.includes(value);
+      if (isSelected) {
+        return prev.filter(v => v !== value);
+      }
+      return [...prev, value];
+    });
   };
 
   const handleCityChange = (value: string) => {
+    let newValues: string[];
+    
     if (value === 'all') {
-      setSelectedCities(['all']);
+      newValues = ['all'];
+    } else if (selectedCities.includes('all')) {
+      newValues = [value];
     } else {
-      const newCities = selectedCities.filter(c => c !== 'all');
-      if (newCities.includes(value)) {
-        const updated = newCities.filter(c => c !== value);
-        setSelectedCities(updated.length ? updated : ['all']);
-      } else {
-        setSelectedCities([...newCities, value]);
+      newValues = selectedCities.includes(value)
+        ? selectedCities.filter(v => v !== value)
+        : [...selectedCities, value];
+      
+      if (newValues.length === 0) {
+        newValues = ['all'];
       }
     }
+    
+    setSelectedCities(newValues);
   };
 
   const handleNeighborhoodChange = (value: string) => {
+    let newValues: string[];
+    
     if (value === 'all') {
-      setSelectedNeighborhoods(['all']);
+      newValues = ['all'];
+    } else if (selectedNeighborhoods.includes('all')) {
+      newValues = [value];
     } else {
-      const newNeighborhoods = selectedNeighborhoods.filter(n => n !== 'all');
-      if (newNeighborhoods.includes(value)) {
-        const updated = newNeighborhoods.filter(n => n !== value);
-        setSelectedNeighborhoods(updated.length ? updated : ['all']);
-      } else {
-        setSelectedNeighborhoods([...newNeighborhoods, value]);
+      newValues = selectedNeighborhoods.includes(value)
+        ? selectedNeighborhoods.filter(v => v !== value)
+        : [...selectedNeighborhoods, value];
+      
+      if (newValues.length === 0) {
+        newValues = ['all'];
       }
     }
+    
+    setSelectedNeighborhoods(newValues);
+  };
+
+  const handleGenderChange = (value: string) => {
+    setSelectedGender(value);
+  };
+
+  // Limpar todos os filtros
+  const handleClearFilters = () => {
+    setSelectedCategories(['all']);
+    setSelectedCities(['all']);
+    setSelectedNeighborhoods(['all']);
+    setSelectedGender('all');
   };
 
   // Preparar dados para inserção
   const prepareDisparo = () => {
+    // Converter IDs das categorias para nomes
+    const categoriasNomes = selectedCategories.map(catId => {
+      const categoria = categories?.find(c => c.uid === catId);
+      return categoria?.nome || '';
+    }).filter(nome => nome !== '');
+
     return {
       empresa_uid: company?.uid,
       empresa_nome: company?.nome,
       usuario_nome: user?.nome,
       mensagem: message,
       upload: [],  // Será preenchido após upload
-      categoria: selectedFilters
-        .filter(f => f.type === 'categoria')
-        .map(f => f.value),
-      cidade: selectedFilters
-        .filter(f => f.type === 'cidade')
-        .map(f => f.value),
-      bairro: selectedFilters
-        .filter(f => f.type === 'bairro')
-        .map(f => f.value),
-      qtde: selectedFilters.length > 0 ? 1 : null,
+      categoria: categoriasNomes,
+      cidade: selectedCities[0] === 'all' ? [] : selectedCities,
+      bairro: selectedNeighborhoods[0] === 'all' ? [] : selectedNeighborhoods,
+      qtde: selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 ? 1 : null,
       token: null,
       instancia: null,
       porta: null,
-      nome_disparo: false,
+      nome_disparo: useNomeDisparo,
       saudacao: null
     };
   };
 
   // Handlers para mensagens
-  const handleSendClick = async () => {
-    if (!message && mediaFiles.length === 0) {
+  const handleSendClick = () => {
+    if (!message) {
       toast.showToast({
         type: 'error',
         title: 'Erro',
-        description: 'Adicione uma mensagem ou arquivo para enviar'
+        description: 'Digite uma mensagem antes de enviar'
+      });
+      return;
+    }
+    setShowConfirmDialog(true);
+  };
+
+  const handleSendMessage = async () => {
+    if (!message) {
+      toast.showToast({
+        type: 'error',
+        title: 'Erro',
+        description: 'Digite uma mensagem antes de enviar'
       });
       return;
     }
 
-    const disparo = prepareDisparo();
-    setPreviewDisparo(disparo);
-    setIsConfirmOpen(true);
-  };
-
-  const handleConfirmSend = async () => {
     try {
       setLoading(true);
 
-      // Upload dos arquivos
-      const uploadPromises = mediaFiles.map(async (file) => {
-        const path = `${company?.uid}/disparos/${Date.now()}-${file.file.name}`;
-        const { data: uploadData, error: uploadError } = await uploadFile(file.file, path);
-        if (uploadError) throw uploadError;
-        return uploadData?.path;
-      });
+      // Converter IDs das categorias para nomes
+      const categoriasNomes = selectedCategories.map(catId => {
+        const categoria = categories?.find(c => c.uid === catId);
+        return categoria?.nome || '';
+      }).filter(nome => nome !== '');
 
-      const uploadedFiles = await Promise.all(uploadPromises);
-
-      // Atualizar o disparo com os arquivos
+      // Preparar dados do disparo
       const disparo = {
-        ...previewDisparo,
-        upload: uploadedFiles.filter(Boolean),
+        empresa_uid: company?.uid,
+        empresa_nome: company?.nome,
+        usuario_nome: user?.nome,
+        mensagem: message,
+        upload: [],  // Será preenchido após upload
+        categoria: categoriasNomes,
+        cidade: selectedCities,
+        bairro: selectedNeighborhoods,
+        genero: selectedGender === 'all' ? null : selectedGender,
+        qtde: selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all' ? 1 : null,
+        token: company?.token,
+        instancia: company?.instancia,
+        porta: company?.porta,
+        nome_disparo: useNomeDisparo,
+        saudacao: null,
+        created_at: new Date().toISOString()
       };
 
-      // Inserir na tabela gbp_disparo
-      const { error: insertError } = await supabaseClient
-        .from('gbp_disparo')
-        .insert([disparo]);
+      // Fazer upload dos arquivos
+      if (mediaFiles.length > 0) {
+        const uploadPromises = mediaFiles.map(async (file) => {
+          try {
+            const url = await uploadFile(file.file);
+            return url;
+          } catch (error) {
+            console.error('Erro ao fazer upload do arquivo:', error);
+            throw new Error(`Erro ao fazer upload do arquivo ${file.file.name}`);
+          }
+        });
 
-      if (insertError) throw insertError;
+        const uploadedUrls = await Promise.all(uploadPromises);
+        disparo.upload = uploadedUrls;
+      }
+
+      // Enviar para o backend
+      const { error } = await supabaseClient
+        .from('gbp_disparo')
+        .insert(disparo);
+
+      if (error) throw error;
 
       toast.showToast({
         type: 'success',
         title: 'Sucesso',
-        description: 'Mensagem enviada com sucesso!'
+        description: 'Disparo de mídia enviado com sucesso!'
       });
 
       // Limpar formulário
       setMessage('');
       setMediaFiles([]);
-      setSelectedFilters([]);
-      setIsConfirmOpen(false);
+      setSelectedCategories([]);
+      setSelectedCities([]);
+      setSelectedNeighborhoods([]);
+      setSelectedGender('all');
+      setShowConfirmDialog(false);
 
-    } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
+      // Voltar para a listagem
+      navigate('/disparo-de-midia');
+
+    } catch (error: any) {
+      console.error('Erro ao enviar disparo:', error);
       toast.showToast({
         type: 'error',
         title: 'Erro',
-        description: 'Erro ao enviar mensagem. Tente novamente.'
+        description: error.message || 'Erro ao enviar disparo. Tente novamente.'
       });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handlers para upload de arquivos
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: MediaFile['type']) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    try {
+      const newFiles = Array.from(files).map((file) => ({
+        file,
+        type,
+        previewUrl: type === 'image' || type === 'video' ? URL.createObjectURL(file) : ''
+      }));
+
+      setMediaFiles(prev => [...prev, ...newFiles]);
+    } catch (error) {
+      console.error('Erro ao adicionar arquivos:', error);
+      toast.showToast({
+        type: 'error',
+        title: 'Erro',
+        description: 'Erro ao adicionar arquivos'
+      });
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setMediaFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   // Renderiza os filtros selecionados
@@ -264,15 +338,15 @@ export function DisparoMidia() {
       genero: 'Gênero'
     };
 
-    return selectedFilters.map((filter) => (
+    return selectedCategories.map((filter) => (
       <div
-        key={filter.id}
+        key={filter}
         className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-100 rounded-full text-sm"
       >
-        <span className="font-medium">{filterGroups[filter.type]}:</span>
-        {filter.label}
+        <span className="font-medium">{filterGroups['categoria']}:</span>
+        {filter}
         <button
-          onClick={() => handleRemoveFilter(filter)}
+          onClick={() => handleCategoryChange(filter)}
           className="hover:text-blue-600 dark:hover:text-blue-300"
         >
           <X className="h-3 w-3" />
@@ -302,89 +376,37 @@ export function DisparoMidia() {
     return null;
   }
 
-  // Handlers para upload de arquivos
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: MediaFile['type']) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    try {
-      const newFiles = Array.from(files).map((file) => ({
-        file,
-        type,
-        previewUrl: type === 'image' || type === 'video' ? URL.createObjectURL(file) : ''
-      }));
-
-      setMediaFiles(prev => [...prev, ...newFiles]);
-    } catch (error) {
-      console.error('Erro ao adicionar arquivos:', error);
-      toast.showToast({
-        type: 'error',
-        title: 'Erro',
-        description: 'Erro ao adicionar arquivos'
-      });
-    }
-  };
-
-  const handleRemoveFile = (index: number) => {
-    setMediaFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
   return (
-    <>
-      {/* Banner de Identificação */}
-      {user && company && (
-        <div className="bg-indigo-100 text-indigo-900">
-          <div className="max-w-7xl mx-auto py-1.5 px-4 flex items-center justify-between">
-            <div className="flex flex-col">
-              <span className="font-bold text-lg">⭐ PÁGINA PRINCIPAL (ATUAL/CORRETA)</span>
-              <span className="text-sm">Caminho: pages/DisparoMidia/index.tsx</span>
-              <span className="text-xs text-indigo-600">Esta página contém todos os componentes, hooks e serviços</span>
-            </div>
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-indigo-600" />
-                <span className="font-medium">{company.nome}</span>
-              </div>
-              <div className="h-3.5 w-px bg-indigo-200" />
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-indigo-500" />
-                <span>{user.nome || user.email}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="p-4">
+      <div className="mb-6 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Disparo de Mídia</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          <span className="hidden sm:inline">Envie mensagens e mídias para seus contatos de forma eficiente e organizada.</span>
+          <span className="sm:hidden">Envie mensagens e mídias para contatos.</span>
+        </p>
+      </div>
 
-      <div className="p-4 space-y-4">
-        {/* Título da Página */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Smartphone className="h-5 w-5 text-blue-500" />
-              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Disparo de Mídia</h1>
-            </div>
-
-            <Button
-              onClick={handleSendClick}
-              disabled={loading || !message}
-              className="flex items-center gap-2"
-            >
-              <Send className="h-4 w-4" />
-              Enviar Mensagem
-            </Button>
-          </div>
-        </div>
-
-        {/* Área Principal */}
-        <div className="grid grid-cols-[1fr,400px] gap-4">
-          {/* Coluna Esquerda: Formulário */}
-          <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row gap-4">
+        <div className="w-full lg:w-2/3 space-y-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
             {/* Grupo Mensagem */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5 text-blue-500" />
-                  <h2 className="font-medium">Mensagem</h2>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-blue-500" />
+                    <h2 className="font-medium">Mensagem</h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      Incluir saudação
+                    </span>
+                    <Switch
+                      checked={useNomeDisparo}
+                      onCheckedChange={setUseNomeDisparo}
+                      className="data-[state=checked]:bg-blue-500"
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -497,14 +519,11 @@ export function DisparoMidia() {
                   className="resize-none min-h-[120px] border-gray-200 dark:border-gray-700 focus:ring-blue-500"
                 />
 
-                {/* Dicas de Formatação */}
-                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                  <span className="font-medium">Dicas:</span>
-                  <span className="text-gray-700 dark:text-gray-300 font-medium">*negrito*</span>
-                  <span className="text-gray-700 dark:text-gray-300 italic">_itálico_</span>
-                  <span className="text-gray-700 dark:text-gray-300 line-through">~riscado~</span>
-                  <span className="text-gray-700 dark:text-gray-300 font-mono">```código```</span>
-                </div>
+                {useNomeDisparo && (
+                  <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                    <span className="font-medium">Exemplo:</span> Olá {"{nome}"}!
+                  </div>
+                )}
               </div>
             </div>
 
@@ -514,29 +533,14 @@ export function DisparoMidia() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Filter className="h-5 w-5 text-purple-500" />
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-medium">Filtros</h2>
-                      {(selectedCategories[0] !== 'all' || selectedCities[0] !== 'all' || selectedNeighborhoods[0] !== 'all' || selectedGender !== 'all') && (
-                        <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
-                          {selectedCategories[0] !== 'all' ? selectedCategories.length : 0 +
-                           selectedCities[0] !== 'all' ? selectedCities.length : 0 +
-                           selectedNeighborhoods[0] !== 'all' ? selectedNeighborhoods.length : 0 +
-                           (selectedGender !== 'all' ? 1 : 0)}
-                        </span>
-                      )}
-                    </div>
+                    <h2 className="font-medium">Filtros</h2>
                   </div>
-                  {(selectedCategories[0] !== 'all' || selectedCities[0] !== 'all' || selectedNeighborhoods[0] !== 'all' || selectedGender !== 'all') && (
+                  {(selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all') && (
                     <Button 
                       variant="ghost" 
                       size="sm"
                       className="text-xs text-gray-500 hover:text-purple-500 flex items-center gap-1"
-                      onClick={() => {
-                        setSelectedCategories(['all']);
-                        setSelectedCities(['all']);
-                        setSelectedNeighborhoods(['all']);
-                        setSelectedGender('all');
-                      }}
+                      onClick={handleClearFilters}
                     >
                       <X className="h-3 w-3" />
                       Limpar filtros
@@ -546,41 +550,31 @@ export function DisparoMidia() {
               </div>
 
               <div className="p-4 bg-white dark:bg-gray-800">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {/* Debug Info */}
-                  <div className="col-span-4 text-sm text-gray-500">
-                    Debug: Cidades carregadas: {cities.length}, Bairros: {neighborhoods.length}
-                  </div>
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
                   {/* Categoria */}
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center justify-between">
                       <span>Categoria</span>
-                      {selectedCategories[0] !== 'all' && (
+                      {selectedCategories.length > 0 && (
                         <span className="text-xs text-purple-600">{selectedCategories.length} selecionado(s)</span>
                       )}
                     </Label>
                     <NewSelect 
-                      value={selectedCategories[0]} 
+                      value={selectedCategories[0] || ''} 
                       onValueChange={handleCategoryChange}
+                      disabled={isLoadingCategories}
                     >
                       <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-                        <SelectValue placeholder="Todas as categorias" />
+                        <SelectValue placeholder="Selecione uma categoria" />
                       </SelectTrigger>
-                      <SelectContent className="bg-white dark:bg-gray-800">
-                        <SelectItem value="all" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-                          Todas as categorias
-                        </SelectItem>
-                        {categories.map((category) => (
+                      <SelectContent className="bg-white dark:bg-gray-800 max-h-[200px] overflow-y-auto">
+                        {formattedCategories.map((category) => (
                           <SelectItem 
                             key={category.value} 
                             value={category.value}
                             className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
-                            <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${selectedCategories.includes(category.value) ? 'bg-purple-500' : 'bg-gray-200'}`} />
-                              {category.label}
-                            </div>
+                            {category.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -602,7 +596,7 @@ export function DisparoMidia() {
                       <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
                         <SelectValue placeholder="Todas as cidades" />
                       </SelectTrigger>
-                      <SelectContent className="bg-white dark:bg-gray-800">
+                      <SelectContent className="bg-white dark:bg-gray-800 max-h-[200px] overflow-y-auto">
                         <SelectItem value="all" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                           Todas as cidades
                         </SelectItem>
@@ -612,10 +606,7 @@ export function DisparoMidia() {
                             value={city.value}
                             className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
-                            <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${selectedCities.includes(city.value) ? 'bg-blue-500' : 'bg-gray-200'}`} />
-                              {city.label}
-                            </div>
+                            {city.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -637,7 +628,7 @@ export function DisparoMidia() {
                       <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
                         <SelectValue placeholder="Todos os bairros" />
                       </SelectTrigger>
-                      <SelectContent className="bg-white dark:bg-gray-800">
+                      <SelectContent className="bg-white dark:bg-gray-800 max-h-[200px] overflow-y-auto">
                         <SelectItem value="all" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                           Todos os bairros
                         </SelectItem>
@@ -647,10 +638,7 @@ export function DisparoMidia() {
                             value={neighborhood.value}
                             className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
                           >
-                            <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${selectedNeighborhoods.includes(neighborhood.value) ? 'bg-green-500' : 'bg-gray-200'}`} />
-                              {neighborhood.label}
-                            </div>
+                            {neighborhood.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -662,7 +650,10 @@ export function DisparoMidia() {
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Gênero
                     </Label>
-                    <NewSelect value={selectedGender} onValueChange={setSelectedGender}>
+                    <NewSelect 
+                      value={selectedGender} 
+                      onValueChange={handleGenderChange}
+                    >
                       <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
                         <SelectValue placeholder="Todos os gêneros" />
                       </SelectTrigger>
@@ -670,25 +661,22 @@ export function DisparoMidia() {
                         <SelectItem value="all" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                           Todos os gêneros
                         </SelectItem>
-                        {genders.map((gender) => (
-                          <SelectItem 
-                            key={gender.value} 
-                            value={gender.value}
-                            className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
-                          >
-                            {gender.label}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="M" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                          Masculino
+                        </SelectItem>
+                        <SelectItem value="F" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                          Feminino
+                        </SelectItem>
                       </SelectContent>
                     </NewSelect>
                   </div>
                 </div>
 
                 {/* Tags dos filtros selecionados */}
-                {(selectedCategories[0] !== 'all' || selectedCities[0] !== 'all' || selectedNeighborhoods[0] !== 'all' || selectedGender !== 'all') && (
+                {(selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all') && (
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {selectedCategories[0] !== 'all' && selectedCategories.map(categoryId => {
-                      const category = categories.find(c => c.value === categoryId);
+                    {selectedCategories.map(categoryId => {
+                      const category = formattedCategories.find(c => c.value === categoryId);
                       return category && (
                         <span key={categoryId} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-purple-50 text-purple-700 rounded-md border border-purple-200">
                           {category.label}
@@ -700,7 +688,7 @@ export function DisparoMidia() {
                       );
                     })}
                     
-                    {selectedCities[0] !== 'all' && selectedCities.map(cityId => {
+                    {selectedCities.map(cityId => {
                       const city = cities.find(c => c.value === cityId);
                       return city && (
                         <span key={cityId} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-blue-50 text-blue-700 rounded-md border border-blue-200">
@@ -713,7 +701,7 @@ export function DisparoMidia() {
                       );
                     })}
 
-                    {selectedNeighborhoods[0] !== 'all' && selectedNeighborhoods.map(neighborhoodId => {
+                    {selectedNeighborhoods.map(neighborhoodId => {
                       const neighborhood = neighborhoods.find(n => n.value === neighborhoodId);
                       return neighborhood && (
                         <span key={neighborhoodId} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-50 text-green-700 rounded-md border border-green-200">
@@ -728,7 +716,7 @@ export function DisparoMidia() {
 
                     {selectedGender !== 'all' && (
                       <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-pink-50 text-pink-700 rounded-md border border-pink-200">
-                        {genders.find(g => g.value === selectedGender)?.label}
+                        {['M', 'F'].find(g => g === selectedGender)?.label}
                         <X 
                           className="h-3 w-3 cursor-pointer hover:text-pink-900" 
                           onClick={() => setSelectedGender('all')}
@@ -748,12 +736,12 @@ export function DisparoMidia() {
                     <Upload className="h-5 w-5 text-green-500" />
                     <h2 className="font-medium">Arquivos</h2>
                   </div>
-                  <span className="text-xs text-gray-500">Arraste arquivos ou clique para fazer upload</span>
+                  <span className="text-xs text-gray-500">Arraste ou clique aqui</span>
                 </div>
               </div>
 
               <div className="p-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Imagens */}
                   <div 
                     className="relative group cursor-pointer rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-green-500 dark:hover:border-green-500 transition-colors p-4"
@@ -908,75 +896,158 @@ export function DisparoMidia() {
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Coluna Direita: Preview */}
-          <div className="space-y-6">
-            <Card className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <Smartphone className="h-5 w-5" />
-                Preview
-              </h2>
-              <WhatsAppPreview
-                message={message}
-                files={mediaFiles}
-              />
-            </Card>
-          </div>
-        </div>
-
-        {/* Modal de Confirmação */}
-        <Dialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Confirmar Envio</DialogTitle>
-              <DialogDescription>
-                Revise os dados antes de enviar:
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium">Mensagem:</h4>
-                <p className="text-sm text-gray-500">{message}</p>
-              </div>
-
-              {mediaFiles.length > 0 && (
-                <div>
-                  <h4 className="font-medium">Arquivos:</h4>
-                  <p className="text-sm text-gray-500">
-                    {mediaFiles.length} arquivo(s) anexado(s)
-                  </p>
-                </div>
-              )}
-
-              {selectedFilters.length > 0 && (
-                <div>
-                  <h4 className="font-medium">Filtros:</h4>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {renderSelectedFilters()}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
+            {/* Botões de ação */}
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-end gap-3 sm:gap-4 p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
               <Button
                 variant="outline"
-                onClick={() => setIsConfirmOpen(false)}
+                onClick={() => navigate('/disparo-de-midia')}
+                className="w-full sm:w-auto"
               >
                 Cancelar
               </Button>
               <Button
-                onClick={handleConfirmSend}
-                disabled={loading}
+                onClick={handleSendClick}
+                disabled={loading || !message}
+                className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white"
               >
-                {loading ? 'Enviando...' : 'Confirmar Envio'}
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Enviando...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Enviar Mensagem
+                  </>
+                )}
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </div>
+          </div>
+        </div>
+
+        <div className="w-full lg:w-1/3 space-y-4">
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Smartphone className="h-5 w-5" />
+              Preview
+            </h2>
+            <div className="flex justify-center">
+              <div className="w-[280px]">
+                <WhatsAppPreview
+                  message={message}
+                  files={mediaFiles}
+                />
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
-    </>
+
+      {/* Modal de Confirmação */}
+      <AlertDialog open={showConfirmDialog}>
+        <AlertDialogContent className="bg-white dark:bg-gray-800 max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-white">
+              <Send className="h-6 w-6 text-blue-600" />
+              Confirmação de Disparo
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-600 dark:text-gray-300">
+              <div className="space-y-6">
+                {/* Seção de Aviso */}
+                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
+                  <p className="text-blue-800 dark:text-blue-200 flex items-center gap-2">
+                    <Info className="h-5 w-5 flex-shrink-0" />
+                    <span>
+                      Você está prestes a enviar uma mensagem para os contatos que correspondem aos critérios selecionados.
+                      Por favor, revise os detalhes abaixo antes de confirmar.
+                    </span>
+                  </p>
+                </div>
+
+                {/* Seção de Filtros */}
+                <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <h3 className="font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-white">
+                    <Filter className="h-5 w-5 text-purple-600" />
+                    Filtros Aplicados
+                  </h3>
+                  {(selectedCategories.length === 0 && 
+                    selectedCities.length === 0 && 
+                    selectedNeighborhoods.length === 0 && 
+                    selectedGender === 'all') ? (
+                    <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-900/30 p-3 rounded-md border border-yellow-100 dark:border-yellow-800">
+                      <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+                      <p>Atenção: Nenhum filtro selecionado. A mensagem será enviada para todos os contatos.</p>
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {selectedCategories.length > 0 && (
+                        <li className="flex items-center gap-2">
+                          <Tags className="h-4 w-4 text-purple-600" />
+                          <span>Categorias: <strong>{selectedCategories.length} selecionada(s)</strong></span>
+                        </li>
+                      )}
+                      {selectedCities.length > 0 && (
+                        <li className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-blue-600" />
+                          <span>Cidades: <strong>{selectedCities.length} selecionada(s)</strong></span>
+                        </li>
+                      )}
+                      {selectedNeighborhoods.length > 0 && (
+                        <li className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-green-600" />
+                          <span>Bairros: <strong>{selectedNeighborhoods.length} selecionado(s)</strong></span>
+                        </li>
+                      )}
+                      {selectedGender !== 'all' && (
+                        <li className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-orange-600" />
+                          <span>Gênero: <strong>{selectedGender === 'M' ? 'Masculino' : 'Feminino'}</strong></span>
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Seção de Conteúdo */}
+                <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <h3 className="font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-white">
+                    <MessageSquare className="h-5 w-5 text-green-600" />
+                    Conteúdo da Mensagem
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="bg-white dark:bg-gray-800 p-3 rounded-md border border-gray-200 dark:border-gray-700">
+                      <p className="text-sm whitespace-pre-wrap">{message}</p>
+                    </div>
+                    {mediaFiles.length > 0 && (
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                        <Paperclip className="h-4 w-4" />
+                        <span>{mediaFiles.length} arquivo(s) anexado(s)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-3 sm:gap-0">
+            <AlertDialogCancel 
+              onClick={() => setShowConfirmDialog(false)}
+              className="w-full sm:w-auto bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleSendMessage}
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2"
+            >
+              <Send className="h-4 w-4" />
+              Confirmar e Enviar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

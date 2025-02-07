@@ -3,15 +3,19 @@ import { categoryService } from '../services/categories';
 import { useCompanyStore } from '../store/useCompanyStore';
 import type { Category } from '../types/category';
 
-export function useCategories() {
+export function useCategories(tipo?: string) {
   const { company } = useCompanyStore();
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: ['categorias', company?.uid],
-    queryFn: () => {
+    queryKey: ['categorias', company?.uid, tipo],
+    queryFn: async () => {
       if (!company?.uid) return [];
-      return categoryService.list(company.uid);
+      const categorias = await categoryService.list(company.uid);
+      if (tipo) {
+        return categorias.filter(cat => cat.tipo === tipo);
+      }
+      return categorias;
     },
     enabled: !!company?.uid,
   });
