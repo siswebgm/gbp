@@ -1,17 +1,22 @@
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
-import { User } from '../../../services/users';
 
 interface DeleteUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  user: User;
-  isLoading: boolean;
+  isDeleting: boolean;
+  userName: string;
 }
 
-export function DeleteUserModal({ isOpen, onClose, onConfirm, user, isLoading }: DeleteUserModalProps) {
+export function DeleteUserModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  isDeleting,
+  userName 
+}: DeleteUserModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
@@ -25,7 +30,7 @@ export function DeleteUserModal({ isOpen, onClose, onConfirm, user, isLoading }:
           <div className="mt-2">
             <p className="text-center text-sm text-gray-500">
               Tem certeza que deseja excluir o usuário{' '}
-              <span className="font-medium text-gray-900">{user.nome || user.email}</span>?
+              <span className="font-medium text-gray-900">{userName}</span>?
               <br />
               Esta ação não poderá ser desfeita.
             </p>
@@ -38,7 +43,7 @@ export function DeleteUserModal({ isOpen, onClose, onConfirm, user, isLoading }:
             variant="outline"
             onClick={onClose}
             className="min-w-[100px]"
-            disabled={isLoading}
+            disabled={isDeleting}
           >
             Cancelar
           </Button>
@@ -46,12 +51,12 @@ export function DeleteUserModal({ isOpen, onClose, onConfirm, user, isLoading }:
             type="button"
             variant="destructive"
             onClick={onConfirm}
-            className="min-w-[100px]"
-            disabled={isLoading}
+            className="min-w-[100px] gap-2"
+            disabled={isDeleting}
           >
-            {isLoading ? (
+            {isDeleting ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Excluindo...
               </>
             ) : (

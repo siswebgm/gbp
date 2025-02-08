@@ -11,6 +11,7 @@ import { Eleitores } from '../pages/app/Eleitores';
 import { AttendanceList } from '../pages/AttendanceList';
 import { Documentos } from '../pages/app/Documentos';
 import { Configuracoes } from '../pages/app/Configuracoes';
+import { Users } from '../pages/Users';
 import WhatsAppPage from '../pages/WhatsApp';
 import { Suspense } from 'react';
 import { useAuth } from '../providers/AuthProvider';
@@ -63,6 +64,16 @@ export const router = createBrowserRouter([
           {
             path: 'documentos',
             element: <Documentos />
+          },
+          {
+            path: 'usuarios',
+            element: (
+              <ProtectedRoute>
+                <Suspense fallback={<div>Carregando...</div>}>
+                  <Users />
+                </Suspense>
+              </ProtectedRoute>
+            )
           },
           {
             path: 'configuracoes',

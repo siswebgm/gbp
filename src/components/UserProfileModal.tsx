@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { X, Camera, Loader2 } from 'lucide-react';
+import { X, Camera, Loader2, LogOut } from 'lucide-react';
 import { useAuth } from '../providers/AuthProvider';
 import { supabaseClient } from '../lib/supabase';
-import { useToast } from './ui/use-toast';
+import { useToast } from '../hooks/useToast';
 import { useAuthStore } from '../store/useAuthStore';
 import { useCompanyStore } from '../store/useCompanyStore';
 import { cn } from '../lib/utils';
@@ -18,6 +18,7 @@ import {
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { useNavigate } from 'react-router-dom';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -32,6 +33,8 @@ interface UserData {
 }
 
 export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
+  const navigate = useNavigate();
+  const toast = useToast();
   const [userData, setUserData] = useState<UserData>({
     nome: '',
     contato: '',
@@ -45,10 +48,11 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const { user } = useAuth();
-  const { toast } = useToast();
   const authStore = useAuthStore();
+  const { company } = useCompanyStore();
   const setCompanyUser = useCompanyStore((state) => state.setUser);
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -73,46 +77,35 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
     return `${timestamp}_${name}.${ext}`;
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user?.uid) return;
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.showToast({
+          type: 'error',
+          title: "Arquivo muito grande",
+          description: "O tamanho máximo permitido é 10MB",
+        });
+        return;
+      }
 
-    // Validações
-    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-      toast({
-        title: "Erro",
-        description: "Formato de arquivo não suportado. Use apenas JPG, PNG ou WebP.",
-        variant: "destructive",
-      });
-      return;
+      setSelectedFile(file);
+      
+      // Criar preview da imagem
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
-
-    if (file.size > MAX_FILE_SIZE) {
-      toast({
-        title: "Erro",
-        description: "A imagem é muito grande. O tamanho máximo é 10MB.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Criar preview local da imagem
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setUserData(prev => ({ ...prev, foto: reader.result as string }));
-    };
-    reader.readAsDataURL(file);
-    
-    // Guardar o arquivo para upload posterior
-    setSelectedFile(file);
   };
 
   const handleSave = async () => {
     if (!user?.uid) {
-      toast({
+      toast.showToast({
+        type: 'error',
         title: "Erro",
         description: "Usuário não identificado. Por favor, faça login novamente.",
-        variant: "destructive",
       });
       return;
     }
@@ -128,41 +121,36 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           const fileName = sanitizeFileName(selectedFile.name);
           console.log('Nome do arquivo sanitizado:', fileName);
 
-          // Buscar nome da empresa
-          const { data: empresaData, error: empresaError } = await supabaseClient
-            .from('gbp_empresas')
-            .select('nome')
-            .eq('uid', user.empresa_uid)
-            .single();
-
-          if (empresaError) {
-            console.error('Erro ao buscar empresa:', empresaError);
-            throw new Error(`Erro ao buscar empresa: ${empresaError.message}`);
-          }
-
-          if (!empresaData?.nome) {
-            throw new Error('Nome da empresa não encontrado');
-          }
-
-          // Prepara dados do upload
+          // Preparar dados do upload
           const uploadData = {
             fileSize: selectedFile.size,
             fileType: selectedFile.type,
             fileName,
-            empresa: empresaData.nome,
+            empresa: company?.nome,
             empresa_uid: user.empresa_uid
           };
 
+          if (!company?.nome) {
+            throw new Error('Empresa não encontrada');
+          }
+
+          // Garantir que o nome do bucket esteja em minúsculas
+          const bucketName = company.nome.toLowerCase();
+
           console.log('Iniciando upload...', uploadData);
+
+          // Criar nome do arquivo com timestamp para evitar conflitos
+          const timestamp = new Date().getTime();
+          const safeFileName = `${timestamp}_${fileName}`;
 
           // Fazer upload usando o cliente Supabase
           const { data: uploadDataResponse, error: uploadError } = await supabaseClient
             .storage
-            .from(uploadData.empresa)
-            .upload(fileName, selectedFile, {
+            .from(bucketName) // Usar o nome da empresa em minúsculas
+            .upload(safeFileName, selectedFile, {
               cacheControl: '3600',
               contentType: selectedFile.type,
-              upsert: false
+              upsert: true // Permitir sobrescrever se arquivo existir
             });
 
           if (uploadError) {
@@ -177,7 +165,7 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           // URL pública do arquivo
           const { data: urlData } = await supabaseClient
             .storage
-            .from(uploadData.empresa)
+            .from(bucketName) // Usar o mesmo nome em minúsculas
             .getPublicUrl(uploadDataResponse.path);
 
           photoUrl = urlData.publicUrl;
@@ -187,10 +175,10 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
         } catch (uploadError: any) {
           console.error('Erro no upload:', uploadError);
           
-          toast({
+          toast.showToast({
+            type: 'error',
             title: "Erro no upload",
             description: uploadError.message || "Não foi possível fazer o upload da imagem",
-            variant: "destructive",
           });
           
           throw new Error('Falha no upload da imagem');
@@ -248,11 +236,10 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
         // Atualizar localStorage
         localStorage.setItem('gbp_user', JSON.stringify(updatedUser));
 
-        toast({
+        toast.showToast({
+          type: 'success',
           title: "Sucesso",
           description: "Perfil atualizado com sucesso!",
-          variant: "default",
-          className: "bg-green-50 text-green-700 border-green-200",
         });
 
         onClose();
@@ -260,13 +247,47 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
     } catch (error: any) {
       console.error('Erro ao atualizar perfil:', error);
-      toast({
+      toast.showToast({
+        type: 'error',
         title: "Erro",
         description: error.message || "Não foi possível atualizar o perfil.",
-        variant: "destructive",
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      // Fecha o modal
+      onClose();
+      
+      // Faz logout no Supabase
+      const { error } = await supabaseClient.auth.signOut();
+      if (error) throw error;
+      
+      // Limpa os dados do usuário no AuthStore
+      authStore.logout();
+      
+      // Limpa os dados da empresa
+      setCompanyUser(null);
+      
+      // Mostra mensagem de sucesso
+      toast.showToast({
+        type: 'success',
+        title: 'Logout realizado',
+        description: 'Você foi desconectado com sucesso'
+      });
+
+      // Redireciona para a página de login
+      navigate('/login');
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+      toast.showToast({
+        type: 'error',
+        title: 'Erro ao desconectar',
+        description: 'Ocorreu um erro ao tentar desconectar'
+      });
     }
   };
 
@@ -345,10 +366,10 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
         }
       } catch (error) {
         console.error('Erro ao carregar dados do usuário:', error);
-        toast({
+        toast.showToast({
+          type: 'error',
           title: "Erro",
           description: "Não foi possível carregar os dados do usuário.",
-          variant: "destructive",
         });
       } finally {
         setIsLoading(false);
@@ -365,13 +386,27 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
       <DialogContent className="sm:max-w-[450px] overflow-hidden rounded-lg" hideClose>
         {/* Header com fundo azul e gradiente */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-500 h-[60px] relative">
-          <button
-            onClick={onClose}
-            className="absolute right-3 top-3 rounded-full p-1.5 bg-white/10 backdrop-blur-sm opacity-80 hover:opacity-100 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50"
-          >
-            <X className="h-4 w-4 text-white" />
-            <span className="sr-only">Fechar</span>
-          </button>
+          {/* Botões do topo */}
+          <div className="absolute right-3 top-3 flex items-center gap-2">
+            <button
+              onClick={handleLogout}
+              className="rounded-full p-2 hover:bg-white/20 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50 group"
+              title="Sair do Sistema"
+            >
+              <LogOut 
+                className="h-[18px] w-[18px] text-white/90 transition-all duration-200 group-hover:text-white" 
+                strokeWidth={2.5}
+              />
+              <span className="sr-only">Sair</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-full p-2 hover:bg-white/20 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              <X className="h-[18px] w-[18px] text-white/90 hover:text-white" strokeWidth={2.5} />
+              <span className="sr-only">Fechar</span>
+            </button>
+          </div>
 
           {/* Título centralizado */}
           <div className="h-full flex items-center justify-center">
@@ -389,12 +424,18 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="loading loading-spinner loading-sm"></span>
                   </div>
+                ) : previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    className="h-full w-full object-cover"
+                  />
                 ) : fotoUrl ? (
                   <img
                     src={fotoUrl}
                     alt="Avatar"
                     className="h-full w-full object-cover"
-                    onError={() => setFotoUrl(null)} // Em caso de erro ao carregar imagem
+                    onError={() => setFotoUrl(null)}
                   />
                 ) : (
                   <div className="h-full w-full flex items-center justify-center bg-gray-50">
@@ -405,12 +446,13 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                   <Camera className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                 </div>
               </div>
+
               <input
                 id="avatar-upload"
                 type="file"
                 className="hidden"
                 accept=".jpeg,.jpg,.png,.webp,image/jpeg,image/jpg,image/png,image/webp"
-                onChange={handleFileChange}
+                onChange={handleFileSelect}
               />
             </label>
           </div>
@@ -451,42 +493,45 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="senha" className="text-xs font-medium text-gray-700">Nova senha</Label>
+              <Label htmlFor="senha" className="text-xs font-medium text-gray-700">Senha</Label>
               <Input
                 id="senha"
                 type="password"
                 value={senha}
                 onChange={(e) => setSenha(e.target.value)}
-                placeholder="Deixe em branco para não alterar"
+                placeholder="Digite para alterar a senha"
                 className="h-7 px-2 text-sm border-gray-200 rounded focus:ring-1 focus:ring-primary/20 focus:border-primary transition-all duration-200"
               />
             </div>
           </div>
-        </div>
 
-        {/* Footer */}
-        <div className="px-4 py-2 bg-gray-50/80 flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            className="h-7 px-3 text-xs border-gray-200 hover:bg-white hover:text-gray-900 transition-colors duration-200"
-          >
-            Cancelar
-          </Button>
-          <Button 
-            onClick={handleSave} 
-            disabled={isSaving}
-            className="h-7 px-4 text-xs bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors duration-200"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                Salvando...
-              </>
-            ) : (
-              'Salvar'
-            )}
-          </Button>
+          {/* Divisor */}
+          <div className="my-4 border-t border-gray-200" />
+
+          {/* Footer */}
+          <DialogFooter className="p-4 bg-gray-50 border-t border-gray-100">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              className="h-7 px-3 text-xs border-gray-200 hover:bg-white hover:text-gray-900 transition-colors duration-200"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleSave} 
+              disabled={isSaving}
+              className="h-7 px-4 text-xs bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors duration-200"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Salvar'
+              )}
+            </Button>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

@@ -11,9 +11,11 @@ import {
   UserCog,
   Settings,
   Send,
-  CreditCard
+  CreditCard,
+  CalendarCheck
 } from 'lucide-react';
 import { useCompanyStore } from '../store/useCompanyStore';
+import { useAuth } from '../hooks/useAuth';
 
 export interface MenuItem {
   name: string;
@@ -22,96 +24,103 @@ export interface MenuItem {
   permission?: string;
   isGroup?: boolean;
   children?: MenuItem[];
+  adminOnly?: boolean;
 }
 
 export function useMenuItems() {
   const company = useCompanyStore((state) => state.company);
+  const { user } = useAuth();
   
   const menuItems = useMemo(() => {
     console.log('[DEBUG] Generating menu items');
     
-    // Aqui você pode adicionar lógica baseada nas permissões do usuário
-    const hasFullAccess = true; // Exemplo: verificar permissões do usuário
+    const isAdmin = user?.nivel_acesso === 'admin';
     
     const items: MenuItem[] = [
       {
         name: 'Dashboard',
         icon: LayoutDashboard,
-        path: '/app/dashboard',
-        permission: 'dashboard.view'
-      },
-      {
-        name: 'Planos',
-        icon: CreditCard,
-        path: '/app/planos',
-        permission: 'planos.view'
+        path: '/app',
+        permission: 'dashboard.view',
+        adminOnly: false
       },
       {
         name: 'Eleitores',
         icon: Users,
         path: '/app/eleitores',
-        permission: 'eleitores.view'
+        permission: 'eleitores.view',
+        adminOnly: false
       },
       {
         name: 'Atendimentos',
-        icon: Calendar,
+        icon: CalendarCheck,
         path: '/app/atendimentos',
         permission: 'atendimentos.view',
         isGroup: false,
-        children: []
+        children: [],
+        adminOnly: false
       },
       {
         name: 'Agenda',
         icon: Calendar,
         path: '/app/agenda',
-        permission: 'agenda.view'
+        permission: 'agenda.view',
+        adminOnly: false
       },
       {
         name: 'Resultados Eleitorais',
         icon: BarChart2,
-        path: '/app/election-results',
-        permission: 'resultados.view'
+        path: '/app/resultados-eleitorais',
+        permission: 'resultados.view',
+        adminOnly: true
       },
       {
         name: 'Documentos',
         icon: FileText,
         path: '/app/documentos',
-        permission: 'documentos.view'
+        permission: 'documentos.view',
+        adminOnly: true
       },
       {
         name: 'Disparo de Mídia',
         icon: Send,
         path: '/app/disparo-de-midia',
-        permission: 'disparo-midia.view'
+        permission: 'disparo-midia.view',
+        adminOnly: true
       },
       {
         name: 'Mapa Eleitoral',
         icon: Map,
-        path: '/app/electoral-map',
-        permission: 'mapa.view'
+        path: '/app/mapa-eleitoral',
+        permission: 'mapa.view',
+        adminOnly: true
       },
       {
         name: 'Metas',
         icon: Target,
-        path: '/app/goals',
-        permission: 'metas.view'
+        path: '/app/metas',
+        permission: 'metas.view',
+        adminOnly: false
       },
       {
         name: 'Usuários',
         icon: UserCog,
-        path: '/app/users',
-        permission: 'usuarios.view'
+        path: '/app/usuarios',
+        permission: 'usuarios.view',
+        adminOnly: true
       },
       {
         name: 'Configurações',
         icon: Settings,
-        path: '/app/settings',
-        permission: 'configuracoes.view'
+        path: '/app/configuracoes',
+        permission: 'configuracoes.view',
+        adminOnly: true
       }
     ];
 
-    return items;
-  }, []);
+    // Filtra os itens baseado no nível de acesso
+    return items.filter(item => !item.adminOnly || isAdmin);
+  }, [user]);
 
   return menuItems;
 }

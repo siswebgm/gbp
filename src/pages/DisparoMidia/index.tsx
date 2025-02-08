@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Filter, Image, Video, Mic, FileText, Users, X, MessageSquare, Upload, Smartphone, Play, List, ListOrdered, Code, Building2, User, Info, Loader2, AlertTriangle, Tags, MapPin, Paperclip } from 'lucide-react';
+import { Send, Filter, Image, Video, Mic, FileText, Users, X, MessageSquare, Upload, Smartphone, Play, List, ListOrdered, Code, Building2, User, Info, Loader2, AlertTriangle, Tags, MapPin, Paperclip, CheckCircle } from 'lucide-react';
 import { Card } from '../../components/Card';
 import { useToast } from '../../hooks/useToast';
 import { supabaseClient } from '../../lib/supabase';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../providers/AuthProvider';
 import { useCompanyStore } from '../../store/useCompanyStore';
 import { Loading } from '../../components/Loading';
 import { useFileUpload } from './hooks/useFileUpload';
@@ -82,13 +82,17 @@ export function DisparoMidia() {
   const [message, setMessage] = useState('');
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [useNomeDisparo, setUseNomeDisparo] = useState(true);
+  const [eleitoresCount, setEleitoresCount] = useState<number>(0);
+  const [loadingCount, setLoadingCount] = useState(false);
+  const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Estados para filtros
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(['all']);
+  const [selectedCities, setSelectedCities] = useState<string[]>(['all']);
+  const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<string[]>(['all']);
   const [selectedGender, setSelectedGender] = useState<string>('all');
 
   // Usar o hook de categorias
@@ -103,18 +107,95 @@ export function DisparoMidia() {
   // Buscar opções de filtro
   const { cities, neighborhoods, isLoading: isLoadingFilters } = useFilterOptions();
 
+  // Função para contar eleitores
+  const countEleitores = async () => {
+    if (!company?.uid) return;
+    
+    try {
+      setLoadingCount(true);
+      
+      let query = supabaseClient
+        .from('gbp_eleitores')
+        .select('uid', { count: 'exact', head: true })
+        .eq('empresa_uid', company.uid);
+
+      // Aplicar filtros de categoria
+      if (selectedCategories.length > 0 && selectedCategories[0] !== 'all') {
+        const categoriasNomes = selectedCategories.map(catId => {
+          const categoria = categories?.find(c => c.uid === catId);
+          return categoria?.nome || '';
+        }).filter(nome => nome !== '');
+        
+        if (categoriasNomes.length > 0) {
+          // Criar uma condição OR para cada categoria
+          const filterOr = categoriasNomes.map(cat => `categoria.cs.{${cat}}`).join(',');
+          query = query.or(filterOr);
+        }
+      }
+
+      // Aplicar filtros de cidade
+      if (selectedCities.length > 0 && selectedCities[0] !== 'all') {
+        query = query.in('cidade', selectedCities);
+      }
+
+      // Aplicar filtros de bairro
+      if (selectedNeighborhoods.length > 0 && selectedNeighborhoods[0] !== 'all') {
+        query = query.in('bairro', selectedNeighborhoods);
+      }
+
+      // Aplicar filtro de gênero
+      if (selectedGender !== 'all') {
+        query = query.eq('genero', selectedGender);
+      }
+
+      console.log('Query URL:', query.url); // Debug da URL
+
+      const { count, error } = await query;
+
+      if (error) {
+        console.error('Erro na query:', error);
+        throw error;
+      }
+      
+      setEleitoresCount(count || 0);
+    } catch (error) {
+      console.error('Erro ao contar eleitores:', error);
+      setEleitoresCount(0);
+    } finally {
+      setLoadingCount(false);
+    }
+  };
+
+  // Atualizar contagem quando os filtros mudarem
+  useEffect(() => {
+    countEleitores();
+  }, [selectedCategories, selectedCities, selectedNeighborhoods, selectedGender, company?.uid]);
+
   // Handlers para múltipla seleção
   const handleCategoryChange = (value: string) => {
     if (!value) {
-      setSelectedCategories([]);
       return;
     }
 
     setSelectedCategories(prev => {
-      const isSelected = prev.includes(value);
-      if (isSelected) {
-        return prev.filter(v => v !== value);
+      // Se selecionou "all"
+      if (value === 'all') {
+        return ['all'];
       }
+      
+      // Se já tinha "all" selecionado, remove e adiciona o novo valor
+      if (prev.includes('all')) {
+        return [value];
+      }
+
+      // Se já estava selecionado, remove
+      if (prev.includes(value)) {
+        const newSelection = prev.filter(item => item !== value);
+        // Se ficou vazio, seleciona "all"
+        return newSelection.length === 0 ? ['all'] : newSelection;
+      }
+
+      // Adiciona à seleção
       return [...prev, value];
     });
   };
@@ -189,11 +270,12 @@ export function DisparoMidia() {
       cidade: selectedCities[0] === 'all' ? [] : selectedCities,
       bairro: selectedNeighborhoods[0] === 'all' ? [] : selectedNeighborhoods,
       qtde: selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 ? 1 : null,
-      token: null,
-      instancia: null,
-      porta: null,
+      token: company?.token,
+      instancia: company?.instancia,
+      porta: company?.porta,
       nome_disparo: useNomeDisparo,
-      saudacao: null
+      saudacao: null,
+      created_at: new Date().toISOString()
     };
   };
 
@@ -221,7 +303,7 @@ export function DisparoMidia() {
     }
 
     try {
-      setLoading(true);
+      setSending(true);
 
       // Converter IDs das categorias para nomes
       const categoriasNomes = selectedCategories.map(catId => {
@@ -237,8 +319,8 @@ export function DisparoMidia() {
         mensagem: message,
         upload: [],  // Será preenchido após upload
         categoria: categoriasNomes,
-        cidade: selectedCities,
-        bairro: selectedNeighborhoods,
+        cidade: selectedCities[0] === 'all' ? [] : selectedCities,
+        bairro: selectedNeighborhoods[0] === 'all' ? [] : selectedNeighborhoods,
         genero: selectedGender === 'all' ? null : selectedGender,
         qtde: selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all' ? 1 : null,
         token: company?.token,
@@ -272,23 +354,17 @@ export function DisparoMidia() {
 
       if (error) throw error;
 
-      toast.showToast({
-        type: 'success',
-        title: 'Sucesso',
-        description: 'Disparo de mídia enviado com sucesso!'
-      });
+      // Mostrar modal de sucesso
+      setShowSuccessDialog(true);
 
       // Limpar formulário
       setMessage('');
       setMediaFiles([]);
-      setSelectedCategories([]);
-      setSelectedCities([]);
-      setSelectedNeighborhoods([]);
+      setSelectedCategories(['all']);
+      setSelectedCities(['all']);
+      setSelectedNeighborhoods(['all']);
       setSelectedGender('all');
       setShowConfirmDialog(false);
-
-      // Voltar para a listagem
-      navigate('/disparo-de-midia');
 
     } catch (error: any) {
       console.error('Erro ao enviar disparo:', error);
@@ -298,7 +374,7 @@ export function DisparoMidia() {
         description: error.message || 'Erro ao enviar disparo. Tente novamente.'
       });
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   };
 
@@ -355,11 +431,11 @@ export function DisparoMidia() {
     ));
   };
 
-  // Verificação de nível de acesso
-  const canAccess = user?.nivel_acesso !== 'comum';
+  // Verificar acesso
+  const canAccess = user?.nivel_acesso === 'admin' || user?.nivel_acesso === 'gerente';
 
+  // Redirecionar se não tiver acesso
   useEffect(() => {
-    // Redireciona usuários sem acesso para /app
     if (!canAccess) {
       toast.showToast({
         type: 'error',
@@ -367,11 +443,10 @@ export function DisparoMidia() {
         description: 'Você não tem permissão para acessar esta página'
       });
       navigate('/app');
-      return;
     }
   }, [canAccess, navigate]);
 
-  // Impede qualquer renderização se não tiver acesso
+  // Se não tiver acesso, não renderiza nada
   if (!canAccess) {
     return null;
   }
@@ -530,22 +605,34 @@ export function DisparoMidia() {
             {/* Grupo Filtros */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <Filter className="h-5 w-5 text-purple-500" />
                     <h2 className="font-medium">Filtros</h2>
                   </div>
-                  {(selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all') && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      className="text-xs text-gray-500 hover:text-purple-500 flex items-center gap-1"
-                      onClick={handleClearFilters}
-                    >
-                      <X className="h-3 w-3" />
-                      Limpar filtros
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {loadingCount ? (
+                      <div className="text-sm text-gray-500 flex items-center gap-1">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="hidden sm:inline">Calculando...</span>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-blue-600 font-medium whitespace-nowrap">
+                        {eleitoresCount} {eleitoresCount === 1 ? 'eleitor' : 'eleitores'}
+                      </div>
+                    )}
+                    {(selectedCategories.length > 0 || selectedCities.length > 0 || selectedNeighborhoods.length > 0 || selectedGender !== 'all') && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        className="text-xs text-gray-500 hover:text-purple-500 flex items-center gap-1 p-0 h-auto"
+                        onClick={handleClearFilters}
+                      >
+                        <X className="h-3 w-3" />
+                        <span className="hidden sm:inline">Limpar filtros</span>
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -555,7 +642,7 @@ export function DisparoMidia() {
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center justify-between">
                       <span>Categoria</span>
-                      {selectedCategories.length > 0 && (
+                      {selectedCategories.length > 0 && selectedCategories[0] !== 'all' && (
                         <span className="text-xs text-purple-600">{selectedCategories.length} selecionado(s)</span>
                       )}
                     </Label>
@@ -568,6 +655,9 @@ export function DisparoMidia() {
                         <SelectValue placeholder="Selecione uma categoria" />
                       </SelectTrigger>
                       <SelectContent className="bg-white dark:bg-gray-800 max-h-[200px] overflow-y-auto">
+                        <SelectItem value="all" className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                          Todas as categorias
+                        </SelectItem>
                         {formattedCategories.map((category) => (
                           <SelectItem 
                             key={category.value} 
@@ -946,104 +1036,149 @@ export function DisparoMidia() {
       </div>
 
       {/* Modal de Confirmação */}
-      <AlertDialog open={showConfirmDialog}>
-        <AlertDialogContent className="bg-white dark:bg-gray-800 max-w-2xl">
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="bg-white dark:bg-gray-800">
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-white">
-              <Send className="h-6 w-6 text-blue-600" />
+            <AlertDialogTitle className="flex items-center gap-2 text-lg font-semibold">
+              <Send className="h-5 w-5 text-blue-500" />
               Confirmação de Disparo
             </AlertDialogTitle>
             <AlertDialogDescription className="text-gray-600 dark:text-gray-300">
-              <div className="space-y-6">
-                {/* Seção de Aviso */}
-                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
-                  <p className="text-blue-800 dark:text-blue-200 flex items-center gap-2">
-                    <Info className="h-5 w-5 flex-shrink-0" />
-                    <span>
-                      Você está prestes a enviar uma mensagem para os contatos que correspondem aos critérios selecionados.
-                      Por favor, revise os detalhes abaixo antes de confirmar.
-                    </span>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-2">
+                  <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+                  <p>
+                    Você está prestes a enviar uma mensagem para os contatos que correspondem aos
+                    critérios selecionados. Por favor, revise os detalhes abaixo antes de confirmar.
                   </p>
-                </div>
-
-                {/* Seção de Filtros */}
-                <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                  <h3 className="font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-white">
-                    <Filter className="h-5 w-5 text-purple-600" />
-                    Filtros Aplicados
-                  </h3>
-                  {(selectedCategories.length === 0 && 
-                    selectedCities.length === 0 && 
-                    selectedNeighborhoods.length === 0 && 
-                    selectedGender === 'all') ? (
-                    <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-900/30 p-3 rounded-md border border-yellow-100 dark:border-yellow-800">
-                      <AlertTriangle className="h-5 w-5 flex-shrink-0" />
-                      <p>Atenção: Nenhum filtro selecionado. A mensagem será enviada para todos os contatos.</p>
-                    </div>
-                  ) : (
-                    <ul className="space-y-2">
-                      {selectedCategories.length > 0 && (
-                        <li className="flex items-center gap-2">
-                          <Tags className="h-4 w-4 text-purple-600" />
-                          <span>Categorias: <strong>{selectedCategories.length} selecionada(s)</strong></span>
-                        </li>
-                      )}
-                      {selectedCities.length > 0 && (
-                        <li className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4 text-blue-600" />
-                          <span>Cidades: <strong>{selectedCities.length} selecionada(s)</strong></span>
-                        </li>
-                      )}
-                      {selectedNeighborhoods.length > 0 && (
-                        <li className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-green-600" />
-                          <span>Bairros: <strong>{selectedNeighborhoods.length} selecionado(s)</strong></span>
-                        </li>
-                      )}
-                      {selectedGender !== 'all' && (
-                        <li className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-orange-600" />
-                          <span>Gênero: <strong>{selectedGender === 'M' ? 'Masculino' : 'Feminino'}</strong></span>
-                        </li>
-                      )}
-                    </ul>
-                  )}
-                </div>
-
-                {/* Seção de Conteúdo */}
-                <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                  <h3 className="font-medium mb-3 flex items-center gap-2 text-gray-900 dark:text-white">
-                    <MessageSquare className="h-5 w-5 text-green-600" />
-                    Conteúdo da Mensagem
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="bg-white dark:bg-gray-800 p-3 rounded-md border border-gray-200 dark:border-gray-700">
-                      <p className="text-sm whitespace-pre-wrap">{message}</p>
-                    </div>
-                    {mediaFiles.length > 0 && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                        <Paperclip className="h-4 w-4" />
-                        <span>{mediaFiles.length} arquivo(s) anexado(s)</span>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="gap-3 sm:gap-0">
-            <AlertDialogCancel 
-              onClick={() => setShowConfirmDialog(false)}
-              className="w-full sm:w-auto bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600"
+
+          <div className="space-y-4">
+            {/* Filtros Aplicados */}
+            <div>
+              <h3 className="flex items-center gap-2 font-medium mb-2">
+                <Filter className="h-4 w-4 text-purple-500" />
+                Filtros Aplicados
+              </h3>
+              {isLoadingFilters ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando filtros...
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {selectedCategories.length > 0 && selectedCategories[0] !== 'all' && (
+                    <li className="flex items-center gap-2">
+                      <Tags className="h-4 w-4 text-purple-600" />
+                      <span>Categorias: <strong>{selectedCategories.length} selecionada(s)</strong></span>
+                    </li>
+                  )}
+                  {selectedCities.length > 0 && selectedCities[0] !== 'all' && (
+                    <li className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-blue-600" />
+                      <span>Cidades: <strong>{selectedCities.length} selecionada(s)</strong></span>
+                    </li>
+                  )}
+                  {selectedNeighborhoods.length > 0 && selectedNeighborhoods[0] !== 'all' && (
+                    <li className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-green-600" />
+                      <span>Bairros: <strong>{selectedNeighborhoods.length} selecionado(s)</strong></span>
+                    </li>
+                  )}
+                  {selectedGender !== 'all' && (
+                    <li className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-orange-600" />
+                      <span>Gênero: <strong>{selectedGender === 'M' ? 'Masculino' : 'Feminino'}</strong></span>
+                    </li>
+                  )}
+                  {loadingCount ? (
+                    <li className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Calculando total de eleitores...
+                    </li>
+                  ) : (
+                    <li className="flex items-center gap-2 text-blue-600">
+                      <Users className="h-4 w-4" />
+                      <strong>{eleitoresCount} eleitor{eleitoresCount !== 1 ? 'es' : ''} selecionado{eleitoresCount !== 1 ? 's' : ''}</strong>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+
+            {/* Conteúdo da Mensagem */}
+            <div>
+              <h3 className="flex items-center gap-2 font-medium mb-2">
+                <MessageSquare className="h-4 w-4 text-blue-500" />
+                Conteúdo da Mensagem
+              </h3>
+              <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-sm">
+                {message}
+              </div>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={sending}
+              className="bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
             >
               Cancelar
             </AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleSendMessage}
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2"
+            <AlertDialogAction
+              disabled={sending}
+              className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
+              onClick={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
             >
-              <Send className="h-4 w-4" />
-              Confirmar e Enviar
+              {sending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Send className="h-4 w-4" />
+                  Confirmar e Enviar
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal de Sucesso */}
+      <AlertDialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <AlertDialogContent className="bg-white dark:bg-gray-800">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-lg font-semibold">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Disparo Enviado com Sucesso!
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-600 dark:text-gray-300">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-2">
+                  <Info className="h-5 w-5 text-green-500 mt-0.5" />
+                  <p>
+                    Tudo certo com seu disparo! Você pode continuar suas atividades normais dentro do sistema 
+                    e enviar mais mensagens se desejar.
+                  </p>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <AlertDialogAction
+              className="bg-green-500 hover:bg-green-600 text-white w-full"
+              onClick={() => setShowSuccessDialog(false)}
+            >
+              Continuar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

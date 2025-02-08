@@ -193,36 +193,31 @@ export function Layout() {
               onClick={() => setIsProfileModalOpen(true)}
               className="focus:outline-none focus:ring-2 focus:ring-white/20 rounded-full"
             >
-              {userPhoto ? (
-                <div className="relative">
-                  <img
-                    src={userPhoto}
-                    alt="Foto do usuário"
-                    className="h-8 w-8 rounded-full border-2 border-white/10 hover:border-white/20 transition-colors object-cover"
-                    onError={(e) => {
-                      const target = e.currentTarget as HTMLImageElement;
-                      console.error('Erro ao carregar foto do usuário:', {
-                        src: target.src,
-                        error: e
-                      });
-                      // Fallback para o ícone de usuário
-                      target.style.display = 'none';
-                      // Mostrar o ícone de usuário como fallback
-                      const fallbackIcon = target.parentElement?.querySelector('.fallback-icon');
-                      if (fallbackIcon) {
-                        fallbackIcon.classList.remove('hidden');
-                      }
-                    }}
-                  />
-                  <div className="fallback-icon hidden h-8 w-8 rounded-full bg-blue-500 border-2 border-white/10 hover:border-white/20 transition-colors flex items-center justify-center absolute top-0 left-0">
+              <div className="relative h-8 w-8">
+                {userPhoto ? (
+                  <>
+                    <img
+                      src={userPhoto}
+                      alt="Foto do usuário"
+                      className="h-full w-full rounded-full border-2 border-white/10 hover:border-white/20 transition-colors object-cover"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        setUserPhoto(null); // Limpar a foto em caso de erro
+                      }}
+                    />
+                    {/* Fallback que aparece se a imagem falhar */}
+                    <div className="absolute inset-0 rounded-full bg-blue-500 border-2 border-white/10 hover:border-white/20 transition-colors flex items-center justify-center" 
+                         style={{ display: 'none' }}>
+                      <User className="h-4 w-4 text-white" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-full w-full rounded-full bg-blue-500 border-2 border-white/10 hover:border-white/20 transition-colors flex items-center justify-center">
                     <User className="h-4 w-4 text-white" />
                   </div>
-                </div>
-              ) : (
-                <div className="h-8 w-8 rounded-full bg-blue-500 border-2 border-white/10 hover:border-white/20 transition-colors flex items-center justify-center">
-                  <User className="h-4 w-4 text-white" />
-                </div>
-              )}
+                )}
+              </div>
             </button>
           </div>
         </div>

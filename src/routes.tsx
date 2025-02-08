@@ -160,7 +160,7 @@ export default function AppRoutes() {
           <Route path=":id" element={<AttendanceForm />} />
         </Route>
         <Route path="agenda" element={<Agenda />} />
-        <Route path="resultados" element={<ResultadosEleitorais />} />
+        <Route path="resultados-eleitorais" element={<ResultadosEleitorais />} />
         <Route path="documentos">
           <Route index element={<Documents />} />
           <Route path="novo" element={<NewDocument />} />

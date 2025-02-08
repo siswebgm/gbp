@@ -21,14 +21,15 @@ export function useFileUpload() {
         throw new Error('Empresa não encontrada');
       }
 
-      // Criar bucket baseado no nome da empresa
-      const bucket = company.nome.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      // Nome do bucket sempre em minúsculas
+      const bucket = company.nome.toLowerCase();
       
       // Criar nome do arquivo seguro com timestamp
       const timestamp = new Date().getTime();
       const safeFileName = sanitizeFileName(file.name);
       const fileName = `${timestamp}_${safeFileName}`;
 
+      // Upload no bucket da empresa
       const { data, error } = await supabaseClient.storage
         .from(bucket)
         .upload(fileName, file, {

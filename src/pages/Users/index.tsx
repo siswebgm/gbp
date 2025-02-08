@@ -35,6 +35,10 @@ import { Avatar, AvatarImage, AvatarFallback } from '../../components/ui/avatar'
 import { cn } from '../../lib/utils';
 import { UserFormModal } from '@/components/UserFormModal';
 import { useAuth } from '../../providers/AuthProvider';
+import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogContent, DialogFooter } from '../../components/ui/dialog';
+import { Label } from '../../components/ui/label';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
+import { ShieldCheck } from 'lucide-react';
 
 export function Users() {
   const navigate = useNavigate();
@@ -302,98 +306,144 @@ export function Users() {
     };
 
     return (
-      <Card 
-        key={user.uid} 
-        className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
-        onClick={() => handleEditUser(user)}
+      <div 
+        key={user.uid}
+        className="group transition-all duration-300 hover:scale-[1.02]"
+        style={{
+          animationDelay: `${filteredUsers.indexOf(user) * 100}ms`,
+        }}
       >
-        <CardHeader className="pb-4">
-          <div className="flex items-center space-x-4">
-            <Avatar className="h-12 w-12 border border-gray-200">
-              {user.foto ? (
-                <AvatarImage 
-                  src={user.foto} 
-                  alt={user.nome || 'Avatar'} 
-                  className="object-cover"
-                />
-              ) : (
-                <AvatarFallback className="bg-primary-50 text-primary-700 font-medium">
-                  {user.nome ? getInitials(user.nome) : 'U'}
-                </AvatarFallback>
-              )}
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-                  {user.nome}
-                </h3>
-                <div className="flex items-center gap-2">
+        <Card className="overflow-visible relative h-full flex flex-col bg-white dark:bg-gray-800 shadow-sm hover:shadow-lg transition-all duration-300 border-0">
+          <CardHeader className="pb-4 flex-1 space-y-4">
+            {/* Cabeçalho com Avatar e Informações */}
+            <div className="flex items-start gap-3">
+              <div className="relative">
+                <Avatar className="h-12 w-12 border-2 border-white ring-2 ring-primary/10 flex-shrink-0 transition-transform duration-300 group-hover:scale-110">
+                  {user.foto ? (
+                    <AvatarImage 
+                      src={user.foto} 
+                      alt={user.nome || 'Avatar'} 
+                      className="object-cover"
+                    />
+                  ) : (
+                    <AvatarFallback className="bg-gradient-to-br from-primary/20 to-primary/30 text-primary-700 font-medium">
+                      {user.nome ? getInitials(user.nome) : 'U'}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                <span className={cn(
+                  'absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-white',
+                  isOnline(user.ultimo_acesso) ? 'bg-green-500' : 'bg-gray-300'
+                )} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-white truncate group-hover:text-primary transition-colors">
+                      {user.nome}
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
+                  </div>
+                  
+                  {/* Ações */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 bg-gray-50 hover:bg-primary/10 hover:text-primary transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditUser(user);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 bg-gray-50 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(user);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
                   <span className={cn(
-                    'px-2 py-1 text-xs font-medium rounded-full border',
+                    'inline-flex px-2 py-0.5 text-xs font-medium rounded-full border transition-colors duration-300',
                     getStatusInfo(user.status).color
                   )}>
                     {getStatusInfo(user.status).label}
                   </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {user.cargo}
+                  </span>
                 </div>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
-            </div>
-          </div>
-
-          {/* Metas do Ano */}
-          <div className="mt-4">
-            <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Metas do Ano (2025)</h4>
-            
-            {/* Meta de Atendimentos */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                  <Calendar className="h-4 w-4" />
-                  Atendimentos
-                </span>
-                <span className="font-medium">{stats.totalAtendimentos} / 1.000</span>
-              </div>
-              <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                  style={{ width: `${porcentagemAtendimentos}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500">{porcentagemAtendimentos}% da meta anual</p>
             </div>
 
-            {/* Meta de Eleitores */}
-            <div className="space-y-2 mt-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                  <UsersIcon className="h-4 w-4" />
-                  Eleitores
-                </span>
-                <span className="font-medium">{stats.totalEleitores} / 1.000</span>
+            {/* Metas do Ano */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Metas do Ano (2025)</h4>
+              
+              {/* Meta de Atendimentos */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                    <Calendar className="h-4 w-4" />
+                    <span>Atendimentos</span>
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {stats.totalAtendimentos} / 1.000
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${porcentagemAtendimentos}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 text-right tabular-nums">
+                  {porcentagemAtendimentos}% concluído
+                </p>
               </div>
-              <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full">
-                <div
-                  className="h-full bg-green-500 rounded-full transition-all duration-300"
-                  style={{ width: `${porcentagemEleitores}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500">{porcentagemEleitores}% da meta anual</p>
-            </div>
-          </div>
 
-          {/* Informações adicionais */}
-          <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-500 dark:text-gray-400">Último acesso</p>
-              <p className="font-medium">{formatLastAccess(user.ultimo_acesso)}</p>
+              {/* Meta de Eleitores */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                    <UsersIcon className="h-4 w-4" />
+                    <span>Eleitores</span>
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {stats.totalEleitores} / 1.000
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-green-500 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${porcentagemEleitores}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 text-right tabular-nums">
+                  {porcentagemEleitores}% concluído
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-gray-500 dark:text-gray-400">Função</p>
-              <p className="font-medium">{user.cargo}</p>
+
+            {/* Último Acesso */}
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />
+                Último acesso: {formatLastAccess(user.ultimo_acesso)}
+              </p>
             </div>
-          </div>
-        </CardHeader>
-      </Card>
+          </CardHeader>
+        </Card>
+      </div>
     );
   };
 
@@ -531,7 +581,7 @@ export function Users() {
                     </div>
                   </Card>
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6 auto-rows-fr">
                     {currentUsers.map(renderUserCard)}
                   </div>
                 )}
@@ -619,14 +669,168 @@ export function Users() {
         onSuccess={loadUsers}
         empresaUid={company?.uid || ''}
       />
-      <EditUserModal
-        isOpen={isEditModalOpen}
-        onClose={() => {
-          setIsEditModalOpen(false);
-          setSelectedUser(null);
-        }}
-        onSuccess={loadUsers}
-        user={selectedUser}
+      <Dialog open={isEditModalOpen} onOpenChange={() => {
+        setIsEditModalOpen(false);
+        setSelectedUser(null);
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold">
+              {selectedUser ? 'Editar Usuário' : 'Novo Usuário'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedUser ? 'Atualize os dados do usuário' : 'Preencha os dados para criar um novo usuário'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            // Implementar lógica de edição de usuário aqui
+          }} className="space-y-6 mt-4">
+            <div className="space-y-4">
+              {/* Nome */}
+              <div className="space-y-2">
+                <Label htmlFor="nome">Nome</Label>
+                <Input
+                  id="nome"
+                  placeholder="Digite o nome completo"
+                  value={selectedUser?.nome || ''}
+                  onChange={(e) => {
+                    // Implementar lógica de atualização do nome do usuário aqui
+                  }}
+                  className="w-full"
+                />
+              </div>
+
+              {/* Email */}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Digite o email"
+                  value={selectedUser?.email || ''}
+                  onChange={(e) => {
+                    // Implementar lógica de atualização do email do usuário aqui
+                  }}
+                  className="w-full"
+                />
+              </div>
+
+              {/* Status */}
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={selectedUser?.status || 'active'}
+                  onValueChange={(value) => {
+                    // Implementar lógica de atualização do status do usuário aqui
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione o status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        Ativo
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="inactive">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-gray-400" />
+                        Inativo
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="blocked">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-red-500" />
+                        Bloqueado
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Nível de Acesso */}
+              <div className="space-y-2">
+                <Label htmlFor="cargo">Nível de Acesso</Label>
+                <Select
+                  value={selectedUser?.cargo || 'admin'}
+                  onValueChange={(value) => {
+                    // Implementar lógica de atualização do nível de acesso do usuário aqui
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione o nível de acesso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-primary" />
+                        Admin
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="geral">
+                      <div className="flex items-center gap-2">
+                        <UsersIcon className="h-4 w-4 text-blue-500" />
+                        Geral
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="comum">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-gray-500" />
+                        Comum
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Senha - apenas para novo usuário */}
+              {!selectedUser && (
+                <div className="space-y-2">
+                  <Label htmlFor="senha">Senha</Label>
+                  <Input
+                    id="senha"
+                    type="password"
+                    placeholder="Digite a senha"
+                    value=""
+                    onChange={(e) => {
+                      // Implementar lógica de atualização da senha do usuário aqui
+                    }}
+                    className="w-full"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Botões */}
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setSelectedUser(null);
+                }}
+                disabled={false}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={false}>
+                {selectedUser ? 'Salvar Alterações' : 'Criar Usuário'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <DeleteUserModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        isDeleting={isDeleting}
+        userName={selectedUser?.nome || ''}
       />
     </div>
   );

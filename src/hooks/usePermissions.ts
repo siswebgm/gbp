@@ -24,32 +24,32 @@ export function usePermissions() {
   const isAdmin = user?.nivel_acesso === 'admin';
 
   const hasPermission = (path: string) => {
-    // Remove /app from the beginning of the path
-    const routePath = path.replace(/^\/app/, '');
-    
-    // Log the path being checked
-    console.log('usePermissions - Checking path:', {
-      originalPath: path,
-      routePath,
-      userLevel: user?.nivel_acesso,
-      userPermissions: user?.permissoes,
-      isAdmin
-    });
-    
-    // Admin has access to everything
+    // Se o usuário for admin, tem acesso a tudo
     if (isAdmin) {
       console.log('usePermissions - User is admin, granting access');
       return true;
     }
 
-    // If no permissions are required for this route, allow access
-    if (!routePermissions[routePath]) {
-      console.log('usePermissions - No permissions required for route:', routePath);
+    // Normaliza o path removendo /app do início e trailing slashes
+    const normalizedPath = path.replace(/^\/app/, '').replace(/\/$/, '');
+    
+    // Log the path being checked
+    console.log('usePermissions - Checking path:', {
+      originalPath: path,
+      normalizedPath,
+      userLevel: user?.nivel_acesso,
+      userPermissions: user?.permissoes,
+      isAdmin
+    });
+    
+    // Se não houver permissões definidas para a rota, permite acesso
+    if (!routePermissions[normalizedPath]) {
+      console.log('usePermissions - No permissions required for route:', normalizedPath);
       return true;
     }
 
-    // Check if user has all required permissions
-    const requiredPermissions = routePermissions[routePath];
+    // Verifica se o usuário tem as permissões necessárias
+    const requiredPermissions = routePermissions[normalizedPath];
     console.log('usePermissions - Required permissions:', requiredPermissions);
     
     const hasAllPermissions = requiredPermissions.every(permission =>

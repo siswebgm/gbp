@@ -19,6 +19,8 @@ import {
   Focus,
 } from 'lucide-react';
 import { useAuth } from '../providers/AuthProvider';
+import { useMenuItems } from '../hooks/useMenuItems';
+import cn from 'classnames';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -30,7 +32,7 @@ const navigation = [
   { name: 'Eleitores', href: '/app/eleitores', icon: Users },
   { name: 'Atendimentos', href: '/app/atendimentos', icon: CalendarCheck },
   { name: 'Agenda', href: '/app/agenda', icon: Calendar },
-  { name: 'Resultados Eleitorais', href: '/app/resultados', icon: BarChart3 },
+  { name: 'Resultados Eleitorais', href: '/app/resultados-eleitorais', icon: BarChart3 },
   { name: 'Documentos', href: '/app/documentos', icon: FileText },
   { name: 'Disparo de Mídia', href: '/app/disparo-de-midia', icon: MessageSquare },
   { name: 'Mapa Eleitoral', href: '/app/mapa-eleitoral', icon: Map },
@@ -43,6 +45,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const menuItems = useMenuItems();
   const [showProfileMenu, setShowProfileMenu] = React.useState(false);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
@@ -91,12 +94,37 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 const isActive = 
                   item.href === '/app' 
                     ? location.pathname === '/app' || location.pathname === '/app/'
-                    : location.pathname.startsWith(item.href + '/') || location.pathname === item.href;
+                    : location.pathname.startsWith(item.href);
+
+                const isRestrito = [
+                  '/app/resultados-eleitorais',
+                  '/app/documentos',
+                  '/app/disparo-de-midia',
+                  '/app/mapa-eleitoral',
+                  '/app/users',
+                  '/app/settings'
+                ].includes(item.href);
+
+                const isDisabled = isRestrito && user?.nivel_acesso !== 'admin';
                 
                 return (
                   <Link
                     key={item.name}
-                    to={item.href}
+                    to={isDisabled ? '#' : item.href}
+                    onClick={(e) => {
+                      if (isDisabled) {
+                        e.preventDefault();
+                        // toast.showToast({
+                        //   type: 'error',
+                        //   title: 'Acesso Restrito',
+                        //   description: 'Esta funcionalidade é exclusiva para administradores'
+                        // });
+                        return;
+                      }
+                      if (window.innerWidth < 1024) {
+                        onClose();
+                      }
+                    }}
                     className={`flex items-center ${
                       isCollapsed 
                         ? 'justify-center w-12 h-10 mx-auto' 
@@ -105,13 +133,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       isActive
                         ? 'bg-blue-50 text-blue-600 dark:bg-blue-800/50 dark:text-white shadow-sm'
                         : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    } ${
+                      isDisabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''
                     }`}
                     title={isCollapsed ? item.name : undefined}
-                    onClick={() => {
-                      if (window.innerWidth < 1024) {
-                        onClose();
-                      }
-                    }}
                   >
                     <div className={`flex items-center justify-center ${isCollapsed ? 'w-8 h-8' : 'w-8 h-8'} rounded-lg transition-transform duration-200 ${
                       isActive 
@@ -121,7 +146,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <item.icon className="w-5 h-5" />
                     </div>
                     {!isCollapsed && (
-                      <span className="truncate flex-1">{item.name}</span>
+                      <span className="truncate flex-1">
+                        {item.name}
+                      </span>
                     )}
                   </Link>
                 );
