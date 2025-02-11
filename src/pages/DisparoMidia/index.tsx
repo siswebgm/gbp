@@ -279,17 +279,17 @@ export function DisparoMidia() {
     };
   };
 
-  // Handlers para mensagens
-  const handleSendClick = () => {
-    if (!message) {
-      toast.showToast({
-        type: 'error',
-        title: 'Erro',
-        description: 'Digite uma mensagem antes de enviar'
-      });
-      return;
+  // Função para formatar URL substituindo o último underscore por ponto
+  const formatUrl = (url: string) => {
+    const extensions = ['png', 'jpg', 'jpeg', 'gif', 'mp4', 'mp3', 'wav', 'pdf'];
+    
+    for (const ext of extensions) {
+      if (url.toLowerCase().endsWith(`_${ext}`)) {
+        return url.slice(0, -(ext.length + 1)) + '.' + ext;
+      }
     }
-    setShowConfirmDialog(true);
+    
+    return url;
   };
 
   const handleSendMessage = async () => {
@@ -305,12 +305,6 @@ export function DisparoMidia() {
     try {
       setSending(true);
 
-      // Converter IDs das categorias para nomes
-      const categoriasNomes = selectedCategories.map(catId => {
-        const categoria = categories?.find(c => c.uid === catId);
-        return categoria?.nome || '';
-      }).filter(nome => nome !== '');
-
       // Preparar dados do disparo
       const disparo = {
         empresa_uid: company?.uid,
@@ -318,7 +312,7 @@ export function DisparoMidia() {
         usuario_nome: user?.nome,
         mensagem: message,
         upload: [],  // Será preenchido após upload
-        categoria: categoriasNomes,
+        categoria: selectedCategories[0] === 'all' ? [] : selectedCategories,
         cidade: selectedCities[0] === 'all' ? [] : selectedCities,
         bairro: selectedNeighborhoods[0] === 'all' ? [] : selectedNeighborhoods,
         genero: selectedGender === 'all' ? null : selectedGender,
@@ -336,7 +330,8 @@ export function DisparoMidia() {
         const uploadPromises = mediaFiles.map(async (file) => {
           try {
             const url = await uploadFile(file.file);
-            return url;
+            // Formata a URL substituindo o último underscore por ponto
+            return formatUrl(url);
           } catch (error) {
             console.error('Erro ao fazer upload do arquivo:', error);
             throw new Error(`Erro ao fazer upload do arquivo ${file.file.name}`);
@@ -376,6 +371,19 @@ export function DisparoMidia() {
     } finally {
       setSending(false);
     }
+  };
+
+  // Handlers para mensagens
+  const handleSendClick = () => {
+    if (!message) {
+      toast.showToast({
+        type: 'error',
+        title: 'Erro',
+        description: 'Digite uma mensagem antes de enviar'
+      });
+      return;
+    }
+    setShowConfirmDialog(true);
   };
 
   // Handlers para upload de arquivos
@@ -978,7 +986,7 @@ export function DisparoMidia() {
                     </div>
 
                     {/* Total de Arquivos */}
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="text-xs text-gray-500">
                       {mediaFiles.length} arquivo{mediaFiles.length !== 1 ? 's' : ''} 
                       <span className="text-gray-400"> (passe o mouse sobre o arquivo para remover)</span>
                     </div>
@@ -1037,17 +1045,20 @@ export function DisparoMidia() {
 
       {/* Modal de Confirmação */}
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent className="bg-white dark:bg-gray-800">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-lg font-semibold">
-              <Send className="h-5 w-5 text-blue-500" />
-              Confirmação de Disparo
-            </AlertDialogTitle>
+        <AlertDialogContent className="w-full max-w-3xl bg-white dark:bg-gray-800 p-6 sm:p-8">
+          <AlertDialogHeader className="space-y-4">
+            <div className="flex items-center justify-center space-x-2 text-primary">
+              <Send className="h-8 w-8 text-blue-500" />
+              <AlertDialogTitle className="text-xl sm:text-2xl font-bold">
+                Confirmação de Disparo
+              </AlertDialogTitle>
+            </div>
+            
             <AlertDialogDescription className="text-gray-600 dark:text-gray-300">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg p-4 mb-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg p-3 sm:p-4">
                 <div className="flex items-start gap-2">
-                  <Info className="h-5 w-5 text-blue-500 mt-0.5" />
-                  <p>
+                  <Info className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm sm:text-base">
                     Você está prestes a enviar uma mensagem para os contatos que correspondem aos
                     critérios selecionados. Por favor, revise os detalhes abaixo antes de confirmar.
                   </p>
@@ -1056,7 +1067,7 @@ export function DisparoMidia() {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 mt-6">
             {/* Filtros Aplicados */}
             <div>
               <h3 className="flex items-center gap-2 font-medium mb-2">
@@ -1109,6 +1120,60 @@ export function DisparoMidia() {
               )}
             </div>
 
+            {/* Arquivos Anexados */}
+            <div>
+              <h3 className="flex items-center gap-2 font-medium mb-3">
+                <Paperclip className="h-4 w-4 text-blue-500" />
+                Arquivos Anexados
+              </h3>
+              {mediaFiles.length > 0 ? (
+                <div className="space-y-3">
+                  {mediaFiles.map((file, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <div className="flex-shrink-0">
+                        {file.type === 'image' && (
+                          <div className="w-8 h-8 flex items-center justify-center bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                            <Image className="h-4 w-4 text-blue-500" />
+                          </div>
+                        )}
+                        {file.type === 'video' && (
+                          <div className="w-8 h-8 flex items-center justify-center bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                            <Video className="h-4 w-4 text-purple-500" />
+                          </div>
+                        )}
+                        {file.type === 'audio' && (
+                          <div className="w-8 h-8 flex items-center justify-center bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                            <Mic className="h-4 w-4 text-orange-500" />
+                          </div>
+                        )}
+                        {file.type === 'pdf' && (
+                          <div className="w-8 h-8 flex items-center justify-center bg-red-50 dark:bg-red-900/20 rounded-lg">
+                            <FileText className="h-4 w-4 text-red-500" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          {file.type === 'image' && 'Imagem do WhatsApp de '}
+                          {file.type === 'video' && 'Vídeo do WhatsApp de '}
+                          {file.type === 'audio' && 'Áudio do WhatsApp de '}
+                          {file.type === 'pdf' && ''}
+                          {file.file.name}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0 text-xs text-gray-500">
+                        ({(file.file.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">
+                  Nenhum arquivo anexado
+                </div>
+              )}
+            </div>
+
             {/* Conteúdo da Mensagem */}
             <div>
               <h3 className="flex items-center gap-2 font-medium mb-2">
@@ -1121,16 +1186,16 @@ export function DisparoMidia() {
             </div>
           </div>
 
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:space-x-2">
             <AlertDialogCancel
               disabled={sending}
-              className="bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+              className="w-full sm:w-auto bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
             >
               Cancelar
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={sending}
-              className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
+              className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center gap-2"
               onClick={(e) => {
                 e.preventDefault();
                 handleSendMessage();
@@ -1139,12 +1204,12 @@ export function DisparoMidia() {
               {sending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Enviando...
+                  <span>Enviando...</span>
                 </>
               ) : (
                 <>
                   <Send className="h-4 w-4" />
-                  Confirmar e Enviar
+                  <span>Confirmar e Enviar</span>
                 </>
               )}
             </AlertDialogAction>
